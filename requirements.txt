@@ -1,0 +1,5 @@
+requests
+yt-dlp
+webvtt-py
+youtube-transcript-api
+openai-whisper
