@@ -1,0 +1,63 @@
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Windows build tools
+        shell: pwsh
+        run: |
+          choco install ffmpeg nsis -y --no-progress
+          "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "${env:ProgramFiles(x86)}\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify bundled-tool prerequisites
+        shell: pwsh
+        run: |
+          python --version
+          rustc -Vv
+          cargo -V
+          Get-Command ffmpeg
+          Get-Command ffprobe
+          Get-Command makensis
+
+      - name: Install Tauri CLI
+        shell: pwsh
+        run: cargo install tauri-cli --locked --version "^2"
+
+      - name: Prepare bundled backend assets
+        shell: pwsh
+        run: python tools/prepare_bundle.py
+
+      - name: Build Windows NSIS installer
+        shell: pwsh
+        run: cargo tauri build --bundles nsis
+
+      - name: Upload installer artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          if-no-files-found: warn
+          path: |
+            src-tauri/target/release/bundle/nsis/*
