@@ -504,7 +504,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
 
       summaryHTML.addEventListener('click', (event) => {
-        const link = event.target.closest('a[href]');
+        const target = event.target instanceof Element ? event.target : null;
+        const link = target?.closest('a[href]');
         if (!link || !summaryHTML.contains(link)) {
           return;
         }
