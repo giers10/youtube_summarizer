@@ -9,10 +9,6 @@ It uses:
 - Ollama on `localhost` for summarization and translation
 - SQLite for local history
 
-## Migration State
-
-This folder is the standalone Tauri version of the app. The repository snapshot this was created from did not contain an active Electron runtime, `package.json`, preload script or Electron main process; the actual app behavior was already represented by a static HTML/CSS/JS frontend, a Tauri 2 Rust shell and Python backend helpers. The migration work here keeps that behavior and design intact inside `ytsummarizer_tauri` so it can be built and run without depending on files outside this folder.
-
 ## What It Does
 
 Given a YouTube URL, the app can:
