@@ -714,6 +714,536 @@ fn get_entry_by_id(state: &AppState, id: i64) -> Result<SummaryEntry, String> {
     Ok(stored.into_entry(state))
 }
 
+fn option_trimmed(value: &Option<String>) -> Option<&str> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn select_summary_for_discord(entry: &SummaryEntry) -> Result<&str, String> {
+    option_trimmed(&entry.summary_de)
+        .or_else(|| option_trimmed(&entry.summary_en))
+        .or_else(|| option_trimmed(&entry.summary_jp))
+        .ok_or_else(|| "Entry has no summary to send.".to_string())
+}
+
+fn parse_discord_webhook_url(raw_url: &str) -> Result<reqwest::Url, String> {
+    let trimmed = raw_url.trim();
+    if trimmed.is_empty() {
+        return Err("Add a Discord Webhook URL in Settings first.".to_string());
+    }
+
+    let url =
+        reqwest::Url::parse(trimmed).map_err(|_| "Discord Webhook URL is invalid.".to_string())?;
+    if url.scheme() != "https" {
+        return Err("Discord Webhook URL must use HTTPS.".to_string());
+    }
+
+    let host = url.host_str().unwrap_or_default();
+    let allowed_host = matches!(
+        host,
+        "discord.com" | "discordapp.com" | "canary.discord.com" | "ptb.discord.com"
+    );
+    if !allowed_host || !url.path().starts_with("/api/webhooks/") {
+        return Err("Discord Webhook URL must be a Discord webhook URL.".to_string());
+    }
+
+    Ok(url)
+}
+
+fn char_len(text: &str) -> usize {
+    text.chars().count()
+}
+
+fn take_chars(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
+fn skip_chars(text: &str, chars_to_skip: usize) -> String {
+    text.chars().skip(chars_to_skip).collect()
+}
+
+fn limit_chars(text: &str, max_chars: usize) -> String {
+    if char_len(text) <= max_chars {
+        return text.to_string();
+    }
+    if max_chars <= 3 {
+        return take_chars(text, max_chars);
+    }
+    format!("{}...", take_chars(text, max_chars - 3))
+}
+
+fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn find_first_tag(text: &str, tags: &[&str]) -> Option<(usize, usize)> {
+    tags.iter()
+        .filter_map(|tag| text.find(tag).map(|index| (index, tag.len())))
+        .min_by_key(|(index, _)| *index)
+}
+
+fn remove_think_blocks(text: &str) -> String {
+    let mut output = String::new();
+    let mut rest = text;
+
+    while let Some((start, tag_len)) = find_first_tag(rest, &["<think>", "<thinking>"]) {
+        output.push_str(&rest[..start]);
+        let after_start = &rest[start + tag_len..];
+        if let Some((end, end_tag_len)) = find_first_tag(after_start, &["</think>", "</thinking>"])
+        {
+            rest = &after_start[end + end_tag_len..];
+        } else {
+            rest = "";
+            break;
+        }
+    }
+
+    output.push_str(rest);
+    output
+}
+
+fn is_sentence_start(ch: char) -> bool {
+    ch.is_ascii_uppercase() || ch.is_ascii_digit() || matches!(ch, '"' | '\'' | '(' | '[')
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '.'
+}
+
+fn is_abbreviation(token: &str) -> bool {
+    const ABBREVIATIONS: &[&str] = &[
+        "mr.", "mrs.", "ms.", "dr.", "prof.", "sr.", "jr.", "st.", "vs.", "etc.", "e.g.",
+        "i.e.", "cf.", "al.", "a.m.", "p.m.", "jan.", "feb.", "mar.", "apr.", "jun.", "jul.",
+        "aug.", "sep.", "sept.", "oct.", "nov.", "dec.", "no.", "fig.", "eq.", "vol.", "rev.",
+        "gen.", "gov.", "sen.", "rep.", "dept.", "univ.", "inc.", "ltd.", "co.", "corp.",
+        "bros.", "approx.", "est.", "min.", "sec.", "hr.", "fr.", "bzw.", "z.b.", "d.h.",
+        "u.a.", "u.u.", "i.d.r.", "ca.", "ggf.", "vgl.", "evtl.", "sog.", "u.s.w.", "nr.",
+        "abs.", "art.", "s.", "ff.", "mio.", "mrd.", "sek.", "okt.", "dez.",
+    ];
+    ABBREVIATIONS.contains(&token)
+}
+
+fn is_non_terminal_punctuation_token(token: &str) -> bool {
+    matches!(token, "yahoo!" | "jeopardy!" | "wii!" | "o2!" | "who?")
+}
+
+fn insert_sentence_line_breaks(text: &str) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut output = String::new();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let ch = chars[i];
+        output.push(ch);
+
+        if !matches!(ch, '.' | '!' | '?') {
+            i += 1;
+            continue;
+        }
+
+        let Some(next) = chars.get(i + 1) else {
+            i += 1;
+            continue;
+        };
+        if !next.is_whitespace() {
+            i += 1;
+            continue;
+        }
+
+        let mut k = i + 1;
+        while k < chars.len() && chars[k].is_whitespace() {
+            k += 1;
+        }
+        if k >= chars.len() || !is_sentence_start(chars[k]) {
+            i += 1;
+            continue;
+        }
+
+        if ch == '.'
+            && i > 0
+            && chars[i - 1].is_ascii_alphabetic()
+            && chars.get(k + 1) == Some(&'.')
+        {
+            i += 1;
+            continue;
+        }
+
+        let mut j = i;
+        while j > 0 && is_word_char(chars[j - 1]) {
+            j -= 1;
+        }
+        let token = chars[j..=i]
+            .iter()
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if ch == '.' && is_abbreviation(&token) {
+            i += 1;
+            continue;
+        }
+        if matches!(ch, '!' | '?') && is_non_terminal_punctuation_token(&token) {
+            i += 1;
+            continue;
+        }
+
+        output.push('\n');
+        i = k;
+    }
+
+    output
+}
+
+fn parse_markdown_heading(line: &str) -> Option<&str> {
+    let hash_count = line.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&hash_count) {
+        return None;
+    }
+    line.get(hash_count..)
+        .and_then(|rest| rest.strip_prefix(' '))
+        .map(str::trim)
+        .filter(|heading| !heading.is_empty())
+}
+
+fn is_horizontal_rule(line: &str) -> bool {
+    let trimmed = line.trim();
+    if char_len(trimmed) < 3 {
+        return false;
+    }
+    trimmed.chars().all(|ch| ch == '-')
+        || trimmed.chars().all(|ch| ch == '*')
+        || trimmed.chars().all(|ch| ch == '_')
+}
+
+fn parse_numbered_list(line: &str) -> Option<(&str, &str)> {
+    let (number, rest) = line.split_once(". ")?;
+    if number.is_empty() || !number.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some((number, rest.trim()))
+}
+
+fn parse_bullet_list(line: &str) -> Option<&str> {
+    line.strip_prefix("- ")
+        .or_else(|| line.strip_prefix("* "))
+        .or_else(|| line.strip_prefix("+ "))
+        .map(str::trim)
+}
+
+fn collapse_inline_whitespace(line: &str) -> String {
+    line.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn collapse_blank_lines(text: &str) -> String {
+    let mut lines = Vec::new();
+    let mut blank_count = 0;
+
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            blank_count += 1;
+            if blank_count <= 1 {
+                lines.push(String::new());
+            }
+        } else {
+            blank_count = 0;
+            lines.push(line.to_string());
+        }
+    }
+
+    lines.join("\n").trim().to_string()
+}
+
+fn format_summary_for_discord(summary_text: &str) -> String {
+    let mut text = normalize_newlines(&remove_think_blocks(summary_text));
+    if !text.contains('\n') && !text.contains("```") {
+        text = insert_sentence_line_breaks(&text);
+    }
+
+    let mut formatted = Vec::new();
+    let mut in_code_block = false;
+    let mut in_ordered_context = false;
+
+    for raw_line in text.lines() {
+        let trimmed_line = raw_line.trim_end();
+        let compact_line = trimmed_line.trim();
+
+        if compact_line.starts_with("```") {
+            in_code_block = !in_code_block;
+            formatted.push(trimmed_line.to_string());
+            continue;
+        }
+        if in_code_block {
+            formatted.push(trimmed_line.to_string());
+            continue;
+        }
+        if compact_line.is_empty() {
+            formatted.push(String::new());
+            in_ordered_context = false;
+            continue;
+        }
+
+        if let Some(heading) = parse_markdown_heading(compact_line) {
+            formatted.push(format!("**{heading}**"));
+            formatted.push(String::new());
+            in_ordered_context = false;
+            continue;
+        }
+        if is_horizontal_rule(compact_line) {
+            formatted.push(String::new());
+            in_ordered_context = false;
+            continue;
+        }
+        if let Some((number, rest)) = parse_numbered_list(compact_line) {
+            formatted.push(format!("{number}. {rest}"));
+            in_ordered_context = true;
+            continue;
+        }
+        if let Some(rest) = parse_bullet_list(compact_line) {
+            let indent = if in_ordered_context { "  " } else { "" };
+            formatted.push(format!("{indent}- {rest}"));
+            continue;
+        }
+
+        formatted.push(collapse_inline_whitespace(compact_line));
+        in_ordered_context = false;
+    }
+
+    collapse_blank_lines(&formatted.join("\n"))
+}
+
+fn split_segment_by_words(segment: &str, max_len: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut piece = String::new();
+
+    for word in segment.split(' ') {
+        let next = if piece.is_empty() {
+            word.to_string()
+        } else {
+            format!("{piece} {word}")
+        };
+
+        if char_len(&next) <= max_len {
+            piece = next;
+            continue;
+        }
+
+        if !piece.is_empty() {
+            chunks.push(piece.trim_end().to_string());
+        }
+
+        piece = word.to_string();
+        while char_len(&piece) > max_len {
+            chunks.push(take_chars(&piece, max_len));
+            piece = skip_chars(&piece, max_len);
+        }
+    }
+
+    if !piece.is_empty() {
+        chunks.push(piece.trim_end().to_string());
+    }
+
+    chunks
+}
+
+fn split_summary_into_chunks(summary_text: &str, max_len: usize) -> Vec<String> {
+    let cleaned = normalize_newlines(summary_text).trim().to_string();
+    if cleaned.is_empty() {
+        return vec![String::new()];
+    }
+
+    let prepared = if cleaned.contains('\n') {
+        cleaned
+    } else {
+        insert_sentence_line_breaks(&cleaned)
+    };
+
+    let mut segments = Vec::new();
+    let mut lines = prepared.split('\n').peekable();
+    while let Some(line) = lines.next() {
+        segments.push(line.to_string());
+        if lines.peek().is_some() {
+            segments.push("\n".to_string());
+        }
+    }
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+
+    for segment in segments {
+        let candidate = format!("{current}{segment}");
+        if char_len(&candidate) <= max_len {
+            current = candidate;
+            continue;
+        }
+
+        if !current.is_empty() {
+            chunks.push(current.trim_end().to_string());
+            current.clear();
+        }
+
+        if char_len(&segment) <= max_len {
+            current = segment;
+        } else {
+            chunks.extend(split_segment_by_words(&segment, max_len));
+        }
+    }
+
+    if !current.is_empty() {
+        chunks.push(current.trim_end().to_string());
+    }
+
+    if chunks.is_empty() {
+        vec![String::new()]
+    } else {
+        chunks
+    }
+}
+
+fn build_discord_messages(
+    title_line: &str,
+    channel_text_line: &str,
+    video_line: &str,
+    summary_text: &str,
+) -> Vec<String> {
+    let first_prefix = format!("{title_line}\n{channel_text_line}\n\n");
+    let last_suffix = format!("\n\n{video_line}");
+
+    let available = |used: usize| DISCORD_MAX_MESSAGE_LENGTH.saturating_sub(used).max(1);
+    let first_limit = available(char_len(&first_prefix));
+    let middle_limit = DISCORD_MAX_MESSAGE_LENGTH;
+    let last_limit = available(char_len(&last_suffix));
+    let single_limit = available(char_len(&first_prefix) + char_len(&last_suffix));
+
+    let mut chunks = split_summary_into_chunks(summary_text, middle_limit);
+    if chunks.len() == 1 && char_len(&chunks[0]) > single_limit {
+        chunks = split_summary_into_chunks(summary_text, first_limit);
+    }
+
+    if char_len(&chunks[0]) > first_limit {
+        let first_parts = split_summary_into_chunks(&chunks[0], first_limit);
+        chunks.splice(0..1, first_parts);
+    }
+
+    if chunks.len() > 1 && char_len(chunks.last().unwrap_or(&String::new())) > last_limit {
+        let last_index = chunks.len() - 1;
+        let last_parts = split_summary_into_chunks(&chunks[last_index], last_limit);
+        chunks.splice(last_index.., last_parts);
+    }
+
+    if chunks.len() == 1 {
+        return vec![format!("{first_prefix}{}{last_suffix}", chunks[0])];
+    }
+
+    let mut messages = Vec::new();
+    messages.push(format!("{first_prefix}{}", chunks[0]));
+    for chunk in chunks.iter().skip(1).take(chunks.len().saturating_sub(2)) {
+        messages.push(chunk.to_string());
+    }
+    messages.push(format!("{}{last_suffix}", chunks[chunks.len() - 1]));
+    messages
+}
+
+fn fetch_channel_name(client: &Client, video_url: Option<&str>) -> String {
+    let Some(video_url) = video_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "Unknown channel".to_string();
+    };
+
+    let Ok(mut oembed_url) = reqwest::Url::parse("https://www.youtube.com/oembed") else {
+        return "Unknown channel".to_string();
+    };
+    oembed_url
+        .query_pairs_mut()
+        .append_pair("url", video_url)
+        .append_pair("format", "json");
+
+    client
+        .get(oembed_url)
+        .send()
+        .and_then(|response| response.error_for_status())
+        .and_then(|response| response.json::<serde_json::Value>())
+        .ok()
+        .and_then(|json| {
+            json.get("author_name")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "Unknown channel".to_string())
+}
+
+fn post_discord_message(
+    client: &Client,
+    webhook_url: &reqwest::Url,
+    content: &str,
+) -> Result<(), String> {
+    if char_len(content) > DISCORD_MAX_MESSAGE_LENGTH {
+        return Err("Internal error: Discord message exceeded 2000 characters.".to_string());
+    }
+
+    let response = client
+        .post(webhook_url.clone())
+        .json(&serde_json::json!({
+            "content": content,
+            "allowed_mentions": {
+                "parse": []
+            }
+        }))
+        .send()
+        .map_err(|err| format!("Discord webhook request failed: {err}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        return Err(format!("Discord webhook failed: HTTP {status} - {body}"));
+    }
+
+    Ok(())
+}
+
+fn post_summary_to_discord(
+    client: &Client,
+    webhook_url: &reqwest::Url,
+    entry: &SummaryEntry,
+) -> Result<(), String> {
+    let summary = select_summary_for_discord(entry)?;
+    let channel_name = option_trimmed(&entry.channel)
+        .map(str::to_string)
+        .unwrap_or_else(|| fetch_channel_name(client, option_trimmed(&entry.url)));
+    let title = option_trimmed(&entry.video_name).unwrap_or("Untitled");
+    let video_url = option_trimmed(&entry.url).unwrap_or_default();
+
+    let title_line = limit_chars(&format!("**{title}**"), 500);
+    let channel_text_line = limit_chars(&channel_name, 300);
+    let video_line = limit_chars(&format!("Video: {video_url}"), 700);
+    let summary_text = format_summary_for_discord(summary);
+    let messages = build_discord_messages(
+        &title_line,
+        &channel_text_line,
+        &video_line,
+        &summary_text,
+    );
+
+    for (index, message) in messages.iter().enumerate() {
+        post_discord_message(client, webhook_url, message)?;
+        if index < messages.len() - 1 {
+            thread::sleep(Duration::from_millis(DISCORD_MESSAGE_DELAY_MS));
+        }
+    }
+
+    Ok(())
+}
+
+fn send_summary_to_discord_inner(
+    state: &AppState,
+    request: SendSummaryToDiscordRequest,
+) -> Result<(), String> {
+    let webhook_url = parse_discord_webhook_url(&request.webhook_url)?;
+    let entry = get_entry_by_id(state, request.id)?;
+    let client = Client::new();
+    post_summary_to_discord(&client, &webhook_url, &entry)
+}
+
 fn summarize_video_inner(
     state: &AppState,
     app: &AppHandle,
