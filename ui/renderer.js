@@ -539,7 +539,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   function setActionLinksDisabled(disabled) {
-    document.querySelectorAll('.delete-entry-button').forEach(button => {
+    document.querySelectorAll('.entry-icon-button').forEach(button => {
       if (disabled) {
         button.disabled = true;
         button.style.opacity = '0.5';
