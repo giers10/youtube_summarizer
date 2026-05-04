@@ -21,12 +21,13 @@ Given a YouTube URL, the app can:
 - generate an English summary with a local Ollama model
 - optionally translate that summary into German and Japanese
 - store the results locally so they can be reopened later
+- optionally send individual summaries to Discord with a user-provided webhook URL
 
 ## Local-Only Behavior
 
 This repository is intentionally reset to a clean publishable state:
 
-- no Discord webhook integration
+- no bundled Discord webhook URL or production credentials
 - no remote PHP/MySQL sync
 - no bundled production data or pre-filled database
 - runtime data is stored in the OS app data directory, not in the repo

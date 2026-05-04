@@ -814,13 +814,13 @@ fn is_word_char(ch: char) -> bool {
 
 fn is_abbreviation(token: &str) -> bool {
     const ABBREVIATIONS: &[&str] = &[
-        "mr.", "mrs.", "ms.", "dr.", "prof.", "sr.", "jr.", "st.", "vs.", "etc.", "e.g.",
-        "i.e.", "cf.", "al.", "a.m.", "p.m.", "jan.", "feb.", "mar.", "apr.", "jun.", "jul.",
-        "aug.", "sep.", "sept.", "oct.", "nov.", "dec.", "no.", "fig.", "eq.", "vol.", "rev.",
-        "gen.", "gov.", "sen.", "rep.", "dept.", "univ.", "inc.", "ltd.", "co.", "corp.",
-        "bros.", "approx.", "est.", "min.", "sec.", "hr.", "fr.", "bzw.", "z.b.", "d.h.",
-        "u.a.", "u.u.", "i.d.r.", "ca.", "ggf.", "vgl.", "evtl.", "sog.", "u.s.w.", "nr.",
-        "abs.", "art.", "s.", "ff.", "mio.", "mrd.", "sek.", "okt.", "dez.",
+        "mr.", "mrs.", "ms.", "dr.", "prof.", "sr.", "jr.", "st.", "vs.", "etc.", "e.g.", "i.e.",
+        "cf.", "al.", "a.m.", "p.m.", "jan.", "feb.", "mar.", "apr.", "jun.", "jul.", "aug.",
+        "sep.", "sept.", "oct.", "nov.", "dec.", "no.", "fig.", "eq.", "vol.", "rev.", "gen.",
+        "gov.", "sen.", "rep.", "dept.", "univ.", "inc.", "ltd.", "co.", "corp.", "bros.",
+        "approx.", "est.", "min.", "sec.", "hr.", "fr.", "bzw.", "z.b.", "d.h.", "u.a.", "u.u.",
+        "i.d.r.", "ca.", "ggf.", "vgl.", "evtl.", "sog.", "u.s.w.", "nr.", "abs.", "art.", "s.",
+        "ff.", "mio.", "mrd.", "sek.", "okt.", "dez.",
     ];
     ABBREVIATIONS.contains(&token)
 }
@@ -874,10 +874,7 @@ fn insert_sentence_line_breaks(text: &str) -> String {
         while j > 0 && is_word_char(chars[j - 1]) {
             j -= 1;
         }
-        let token = chars[j..=i]
-            .iter()
-            .collect::<String>()
-            .to_ascii_lowercase();
+        let token = chars[j..=i].iter().collect::<String>().to_ascii_lowercase();
         if ch == '.' && is_abbreviation(&token) {
             i += 1;
             continue;
@@ -1124,7 +1121,7 @@ fn build_discord_messages(
         chunks.splice(0..1, first_parts);
     }
 
-    if chunks.len() > 1 && char_len(chunks.last().unwrap_or(&String::new())) > last_limit {
+    if chunks.len() > 1 && chunks.last().map(|chunk| char_len(chunk)).unwrap_or(0) > last_limit {
         let last_index = chunks.len() - 1;
         let last_parts = split_summary_into_chunks(&chunks[last_index], last_limit);
         chunks.splice(last_index.., last_parts);
@@ -1217,12 +1214,8 @@ fn post_summary_to_discord(
     let channel_text_line = limit_chars(&channel_name, 300);
     let video_line = limit_chars(&format!("Video: {video_url}"), 700);
     let summary_text = format_summary_for_discord(summary);
-    let messages = build_discord_messages(
-        &title_line,
-        &channel_text_line,
-        &video_line,
-        &summary_text,
-    );
+    let messages =
+        build_discord_messages(&title_line, &channel_text_line, &video_line, &summary_text);
 
     for (index, message) in messages.iter().enumerate() {
         post_discord_message(client, webhook_url, message)?;
@@ -1460,6 +1453,17 @@ async fn translate_summary(
 }
 
 #[tauri::command]
+async fn send_summary_to_discord(
+    state: State<'_, AppState>,
+    request: SendSummaryToDiscordRequest,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || send_summary_to_discord_inner(&state, request))
+        .await
+        .map_err(|err| format!("Discord task failed: {err}"))?
+}
+
+#[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     that(url).map_err(|err| format!("Failed to open URL: {err}"))
 }
@@ -1531,6 +1535,7 @@ fn main() {
             summarize_video,
             delete_summary,
             translate_summary,
+            send_summary_to_discord,
             open_external,
             open_file
         ])
