@@ -75,6 +75,7 @@
     }
     .entry .middle {
       flex: 1;
+      min-width: 0;
     }
     .entry .right {
       width: 140px;
@@ -97,6 +98,39 @@
     }
     .entry .summary {
       transition: max-height 0.2s;
+    }
+    .entry-actions {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      gap: 4px;
+    }
+    .entry-icon-button {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: #9f1239;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .entry-icon-button:hover {
+      background: #ffe4e6;
+    }
+    .entry-icon-button svg {
+      width: 15px;
+      height: 15px;
+      stroke: currentColor;
+    }
+    .delete-entry-button {
+      color: #9f1239;
+      font-size: 22px;
+      font-weight: normal;
     }
     .entry .summary hr {
       border: 0;
@@ -205,6 +239,16 @@
 	    .settings-row input[type="checkbox"] {
 	      accent-color: #9f1239;
 	    }
+	    .settings-input {
+	      width: 100%;
+	      box-sizing: border-box;
+	      padding: 9px 10px;
+	      border: 1px solid #fda4af;
+	      border-radius: 4px;
+	      background: #fff;
+	      color: #7f1d1d;
+	      font-size: 14px;
+	    }
 	    .settings-field-label {
 	      display: block;
 	      margin: 16px 0 6px;
@@ -268,10 +312,19 @@
 	        <span>Use Whisper</span>
 	      </label>
 	      <label class="settings-row">
-	        <input type="checkbox" id="autotranslate-checkbox" checked />
-	        <span>Auto Translate</span>
-	      </label>
-	      <label for="master-prompt-textarea" class="settings-field-label">Master Prompt</label>
+		        <input type="checkbox" id="autotranslate-checkbox" checked />
+		        <span>Auto Translate</span>
+		      </label>
+		      <label for="discord-webhook-url-input" class="settings-field-label">Discord Webhook URL</label>
+		      <input
+		        type="password"
+		        id="discord-webhook-url-input"
+		        class="settings-input"
+		        placeholder="https://discord.com/api/webhooks/..."
+		        autocomplete="off"
+		        spellcheck="false"
+		      />
+		      <label for="master-prompt-textarea" class="settings-field-label">Master Prompt</label>
 	      <textarea id="master-prompt-textarea" class="settings-prompt-textarea" spellcheck="false"></textarea>
 	      <div class="settings-actions">
 	        <button type="button" id="reset-master-prompt-button">Reset to default</button>
