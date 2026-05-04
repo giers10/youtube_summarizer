@@ -8,7 +8,7 @@ use std::{
     process::{Command, Stdio},
     sync::{Arc, Mutex},
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(target_os = "windows")]
@@ -24,6 +24,8 @@ use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, State, WebviewWind
 const DEFAULT_MODEL: &str = "mistral:latest";
 const OLLAMA_TAGS_URL: &str = "http://localhost:11434/api/tags";
 const BACKEND_EXECUTABLE_NAME: &str = "yts-backend";
+const DISCORD_MAX_MESSAGE_LENGTH: usize = 2000;
+const DISCORD_MESSAGE_DELAY_MS: u64 = 1000;
 const TARGET_TRIPLE: &str = env!("TAURI_BUILD_TARGET");
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -72,6 +74,13 @@ struct TranslateSummaryRequest {
     lang: String,
     model: Option<String>,
     prompt_template: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SendSummaryToDiscordRequest {
+    id: i64,
+    webhook_url: String,
 }
 
 #[derive(Debug, Deserialize)]
