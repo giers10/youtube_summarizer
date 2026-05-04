@@ -223,23 +223,54 @@ window.addEventListener('DOMContentLoaded', async () => {
       entry.classList.add('entry');
       entry.style.overflow = 'hidden';
 
+      const entryActions = document.createElement('div');
+      entryActions.classList.add('entry-actions');
+
+      const uploadButton = document.createElement('button');
+      uploadButton.type = 'button';
+      uploadButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"></path><path d="m7 9 5-5 5 5"></path><path d="M20 16v4H4v-4"></path></svg>';
+      uploadButton.classList.add('entry-icon-button', 'upload-entry-button');
+      uploadButton.title = 'Send to Discord';
+      uploadButton.setAttribute('aria-label', 'Send to Discord');
+      uploadButton.disabled = isLoading;
+      uploadButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isLoading) {
+          return;
+        }
+
+        const webhookUrl = getDiscordWebhookUrl();
+        if (!webhookUrl) {
+          alert('Add a Discord Webhook URL in Settings first.');
+          openSettings();
+          return;
+        }
+
+        isLoading = true;
+        summarizeButton.disabled = true;
+        setLoadingMessage('Sending to Discord...');
+        setActionLinksDisabled(true);
+
+        window.api.sendSummaryToDiscord(item.id, webhookUrl)
+          .catch(err => {
+            alert('Error sending to Discord: ' + err.message);
+          })
+          .finally(() => {
+            loadingIndicator.style.display = 'none';
+            loadingIndicator.textContent = 'Loading...';
+            summarizeButton.disabled = false;
+            isLoading = false;
+            setActionLinksDisabled(false);
+          });
+      });
+
       const deleteButton = document.createElement('button');
       deleteButton.type = 'button';
       deleteButton.innerHTML = '&times;';
-      deleteButton.classList.add('delete-entry-button');
-      deleteButton.style.width = '24px';
-      deleteButton.style.height = '24px';
-      deleteButton.style.display = 'flex';
-      deleteButton.style.alignItems = 'center';
-      deleteButton.style.justifyContent = 'center';
-      deleteButton.style.border = 'none';
-      deleteButton.style.background = 'transparent';
-      deleteButton.style.color = '#9f1239';
-      deleteButton.style.fontSize = '22px';
-      deleteButton.style.fontWeight = 'normal';
-      deleteButton.style.cursor = 'pointer';
-      deleteButton.style.padding = '0';
-      deleteButton.style.lineHeight = '1';
+      deleteButton.classList.add('entry-icon-button', 'delete-entry-button');
+      deleteButton.title = 'Delete entry';
+      deleteButton.setAttribute('aria-label', 'Delete entry');
       deleteButton.disabled = isLoading;
       deleteButton.addEventListener('click', (e) => {
         e.preventDefault();
@@ -352,7 +383,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       headlineMain.appendChild(arrow);
       headlineMain.appendChild(titleEl);
       headline.appendChild(headlineMain);
-      headline.appendChild(deleteButton);
+      entryActions.appendChild(uploadButton);
+      entryActions.appendChild(deleteButton);
+      headline.appendChild(entryActions);
 
       const channelEl = document.createElement('span');
       channelEl.style.fontSize = '14px';
