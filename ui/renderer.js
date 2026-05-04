@@ -56,6 +56,12 @@ window.api = {
   deleteSummary: (id) => invoke('delete_summary', {
     request: { id }
   }),
+  sendSummaryToDiscord: (id, webhookUrl) => invoke('send_summary_to_discord', {
+    request: {
+      id,
+      webhookUrl
+    }
+  }),
   translateSummary: (id, lang, model, promptTemplate) => invoke('translate_summary', {
     request: {
       id,
@@ -86,6 +92,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const settingsCloseButton = document.getElementById('settings-close-button');
   const masterPromptTextarea = document.getElementById('master-prompt-textarea');
   const resetMasterPromptButton = document.getElementById('reset-master-prompt-button');
+  const discordWebhookInput = document.getElementById('discord-webhook-url-input');
   const translationPromptDeTextarea = document.getElementById('translation-prompt-de-textarea');
   const translationPromptJpTextarea = document.getElementById('translation-prompt-jp-textarea');
   const resetTranslationPromptDeButton = document.getElementById('reset-translation-prompt-de-button');
@@ -121,9 +128,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     return DEFAULT_TRANSLATION_PROMPTS[lang];
   }
 
+  function getDiscordWebhookUrl() {
+    return (localStorage.getItem('discordWebhookUrl') || '').trim();
+  }
+
   function syncSettingsFields() {
     whisperCheckbox.checked = localStorage.getItem('useWhisper') === '0' ? false : true;
     autoTranslateCheckbox.checked = localStorage.getItem('autoTranslate') === '1' ? true : false;
+    discordWebhookInput.value = getDiscordWebhookUrl();
     masterPromptTextarea.value = getMasterPrompt();
     translationPromptDeTextarea.value = getTranslationPrompt('de');
     translationPromptJpTextarea.value = getTranslationPrompt('jp');
@@ -132,7 +144,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   function openSettings() {
     syncSettingsFields();
     settingsDialog.hidden = false;
-    masterPromptTextarea.focus();
+    discordWebhookInput.focus();
   }
 
   function closeSettings() {
@@ -141,6 +153,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   whisperCheckbox.checked = localStorage.getItem('useWhisper') === '0' ? false : true;
   autoTranslateCheckbox.checked = localStorage.getItem('autoTranslate') === '1' ? true : false;
+  discordWebhookInput.value = getDiscordWebhookUrl();
   masterPromptTextarea.value = getMasterPrompt();
   translationPromptDeTextarea.value = getTranslationPrompt('de');
   translationPromptJpTextarea.value = getTranslationPrompt('jp');
@@ -150,6 +163,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
   autoTranslateCheckbox.addEventListener('change', () => {
     localStorage.setItem('autoTranslate', autoTranslateCheckbox.checked ? '1' : '0');
+  });
+  discordWebhookInput.addEventListener('input', () => {
+    const webhookUrl = discordWebhookInput.value.trim();
+    if (webhookUrl) {
+      localStorage.setItem('discordWebhookUrl', webhookUrl);
+    } else {
+      localStorage.removeItem('discordWebhookUrl');
+    }
   });
   masterPromptTextarea.addEventListener('input', () => {
     localStorage.setItem('masterPrompt', masterPromptTextarea.value);
