@@ -98,6 +98,68 @@
     }
     .entry .summary {
       transition: max-height 0.2s;
+      line-height: 1.45;
+    }
+    .entry .summary p {
+      margin: 0 0 0.65em;
+    }
+    .entry .summary p:last-child {
+      margin-bottom: 0;
+    }
+    .entry .summary ul,
+    .entry .summary ol {
+      margin: 0.45em 0 0.65em;
+      padding-left: 1.4em;
+    }
+    .entry .summary ul {
+      list-style-type: disc;
+    }
+    .entry .summary ol {
+      list-style-type: decimal;
+    }
+    .entry .summary li {
+      margin-bottom: 0.25em;
+    }
+    .entry .summary blockquote {
+      margin: 0.65em 0;
+      padding-left: 0.85em;
+      border-left: 3px solid #fda4af;
+      color: #7c0e2e;
+    }
+    .entry .summary pre {
+      margin: 0.65em 0;
+      padding: 0.7em;
+      overflow: auto;
+      border: 1px solid #fecdd3;
+      border-radius: 4px;
+      background: #fff;
+      color: #5f0f23;
+    }
+    .entry .summary code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.92em;
+    }
+    .entry .summary :not(pre) > code {
+      padding: 0.08em 0.25em;
+      border-radius: 3px;
+      background: #fff;
+      color: #5f0f23;
+    }
+    .entry .summary table {
+      width: 100%;
+      margin: 0.75em 0;
+      border-collapse: collapse;
+      background: #fff;
+    }
+    .entry .summary th,
+    .entry .summary td {
+      padding: 0.45em 0.55em;
+      border: 1px solid #fecdd3;
+      vertical-align: top;
+      text-align: left;
+    }
+    .entry .summary th {
+      background: #ffe4e6;
     }
     .entry-actions {
       display: flex;
@@ -344,6 +406,7 @@
 	  <div id="pagination-top" class="pagination" style="display:none;"></div>
 	  <div id="summaries-container"></div>
   <div id="pagination-bottom" class="pagination" style="display:none;"></div>
+  <script src="vendor/markdown-it.min.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>
