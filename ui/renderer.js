@@ -3,6 +3,7 @@ const invoke = tauriApi?.core?.invoke;
 const listen = tauriApi?.event?.listen;
 const convertFileSrc = tauriApi?.core?.convertFileSrc;
 const confirmDialog = tauriApi?.dialog?.confirm;
+const MarkdownIt = window.markdownit;
 const DEFAULT_MASTER_PROMPT = `You are an expert summarizer. Summarize the following video concisely:
 
 Title: {title}
@@ -28,6 +29,78 @@ Translation:`
 
 if (!invoke || !listen) {
   throw new Error('Tauri runtime API is unavailable.');
+}
+
+if (typeof MarkdownIt !== 'function') {
+  throw new Error('markdown-it is unavailable.');
+}
+
+const markdownRenderer = createMarkdownRenderer();
+
+function createMarkdownRenderer() {
+  const renderer = new MarkdownIt({
+    html: false,
+    linkify: true,
+    typographer: false,
+    breaks: true
+  });
+  const defaultLinkOpen =
+    renderer.renderer.rules.link_open ||
+    ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+
+  renderer.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+    tokens[idx].attrJoin('class', 'summary-link');
+    tokens[idx].attrSet('target', '_blank');
+    tokens[idx].attrSet('rel', 'noopener noreferrer');
+    return defaultLinkOpen(tokens, idx, options, env, self);
+  };
+
+  return renderer;
+}
+
+function preprocessLLMMarkdown(text) {
+  let normalized = String(text || '')
+    .replace(/<\/think(?:ing)?>[^\S\n]*\n+[^\S\n]*/gi, '</think>')
+    .replace(
+      /(^|\n)\s*<think(?:ing)?>[\s\S]*?(?:<\/think(?:ing)?>|$)\s*(\n\s*\n)?/gi,
+      (_, lead) => (lead ? '\n' : '')
+    )
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u00a0\u202f\u2007]/g, ' ');
+
+  return balanceStreamingCodeFence(normalized);
+}
+
+function markdownToHTML(text) {
+  return markdownRenderer.render(preprocessLLMMarkdown(text));
+}
+
+function balanceStreamingCodeFence(markdown) {
+  const lines = markdown.split(/\r?\n/);
+  let open = null;
+
+  for (const line of lines) {
+    if (!open) {
+      const match = line.match(/^\s*([`~]{3,})([^\s]*)?.*$/);
+      if (match) {
+        open = { fenceChar: match[1][0], fenceLen: match[1].length };
+      }
+      continue;
+    }
+
+    const closeFence = new RegExp(`^\\s*(${open.fenceChar}{${open.fenceLen},})\\s*$`);
+    if (closeFence.test(line)) {
+      open = null;
+    }
+  }
+
+  if (!open) {
+    return markdown;
+  }
+
+  const closingFence = open.fenceChar.repeat(open.fenceLen);
+  return markdown.endsWith('\n') ? markdown + closingFence : `${markdown}\n${closingFence}`;
 }
 
 function toWebviewFileUrl(filePath) {
@@ -420,13 +493,30 @@ window.addEventListener('DOMContentLoaded', async () => {
           summaryHTML.appendChild(missingMsg);
         }
         if (!expanded) {
+          summaryHTML.style.display = '-webkit-box';
           summaryHTML.style.webkitLineClamp = '2';
           summaryHTML.style.maxHeight = '2.8em';
         } else {
+          summaryHTML.style.display = 'block';
           summaryHTML.style.webkitLineClamp = '';
           summaryHTML.style.maxHeight = '';
         }
       }
+
+      summaryHTML.addEventListener('click', (event) => {
+        const link = event.target.closest('a[href]');
+        if (!link || !summaryHTML.contains(link)) {
+          return;
+        }
+        const href = link.getAttribute('href');
+        if (!href || href.startsWith('#')) {
+          return;
+        }
+        event.preventDefault();
+        window.api.openExternal(href).catch(err => {
+          console.error('Failed to open summary link:', err);
+        });
+      });
 
       middle.appendChild(summaryHTML);
 
