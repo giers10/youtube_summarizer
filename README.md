@@ -19,26 +19,6 @@ Given a YouTube URL, the app can:
 - store the results locally so they can be reopened later
 - optionally send individual summaries to Discord with a user-provided webhook URL
 
-## Local-Only Behavior
-
-This repository is intentionally reset to a clean publishable state:
-
-- no bundled Discord webhook URL or production credentials
-- no remote PHP/MySQL sync
-- no bundled production data or pre-filled database
-- runtime data is stored in the OS app data directory, not in the repo
-
-## End User Requirements
-
-If you ship a built installer, the user should only need:
-
-- Ollama installed locally
-- the Ollama model they want to use pulled locally
-
-Notes:
-
-- The installer is designed to bundle the backend helper plus `ffmpeg` / `ffprobe`.
-- Whisper model weights are not bundled; the selected Whisper model is downloaded on first use and then cached locally.
 
 ## Developer Requirements
 
@@ -99,12 +79,6 @@ What `tools/prepare_bundle.py` does:
 - copies `ffmpeg` and `ffprobe` from the build machine into [src-tauri/resources/ffmpeg](src-tauri/resources/ffmpeg)
 
 Build once on each target OS you want to ship. For Windows 10, build on Windows.
-
-## Build On GitHub Actions
-
-A Windows build workflow from the original repository can be pointed at this folder by running the same commands from `ytsummarizer_tauri`.
-
-It should run on `windows-latest`, install `ffmpeg` and NSIS, prepare the bundled Python backend with [tools/prepare_bundle.py](tools/prepare_bundle.py), build an NSIS installer, and upload the result as a workflow artifact named `windows-installer`.
 
 ## Notes
 
