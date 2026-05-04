@@ -1,4 +1,4 @@
-# YouTube Summarizer
+# YouTube Summarizer Tauri
 
 This is a local-first desktop app for summarizing YouTube videos with Ollama.
 
@@ -8,6 +8,10 @@ It uses:
 - a bundled Python backend for transcript/audio processing in release builds
 - Ollama on `localhost` for summarization and translation
 - SQLite for local history
+
+## Migration State
+
+This folder is the standalone Tauri version of the app. The repository snapshot this was created from did not contain an active Electron runtime, `package.json`, preload script or Electron main process; the actual app behavior was already represented by a static HTML/CSS/JS frontend, a Tauri 2 Rust shell and Python backend helpers. The migration work here keeps that behavior and design intact inside `ytsummarizer_tauri` so it can be built and run without depending on files outside this folder.
 
 ## What It Does
 
@@ -48,7 +52,7 @@ For development in this repo you still need:
 - FFmpeg in `PATH`
 - Ollama running locally on `http://localhost:11434`
 
-Python dependencies are listed in [requirements.txt](/Users/giers/youtube_summarizer/requirements.txt).
+Python dependencies are listed in [requirements.txt](requirements.txt).
 
 ## Run In Development
 
@@ -73,7 +77,7 @@ pip install -r requirements.txt
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
 
-The app prefers a bundled backend executable when one is present under [src-tauri/resources/backend](/Users/giers/youtube_summarizer/src-tauri/resources/backend), and otherwise falls back to the local Python environment for development.
+The app prefers a bundled backend executable when one is present under [src-tauri/resources/backend](src-tauri/resources/backend), and otherwise falls back to the local Python environment for development.
 
 ## Build A Shippable Bundle
 
@@ -93,21 +97,21 @@ cargo tauri build
 What `tools/prepare_bundle.py` does:
 
 - installs PyInstaller into the current Python environment
-- builds a single-file backend executable from [backend_cli.py](/Users/giers/youtube_summarizer/backend_cli.py)
-- copies that executable into [src-tauri/resources/backend](/Users/giers/youtube_summarizer/src-tauri/resources/backend)
-- copies `ffmpeg` and `ffprobe` from the build machine into [src-tauri/resources/ffmpeg](/Users/giers/youtube_summarizer/src-tauri/resources/ffmpeg)
+- builds a single-file backend executable from [backend_cli.py](backend_cli.py)
+- copies that executable into [src-tauri/resources/backend](src-tauri/resources/backend)
+- copies `ffmpeg` and `ffprobe` from the build machine into [src-tauri/resources/ffmpeg](src-tauri/resources/ffmpeg)
 
 Build once on each target OS you want to ship. For Windows 10, build on Windows.
 
 ## Build On GitHub Actions
 
-A Windows build workflow is included at [.github/workflows/windows-installer.yml](/Users/giers/youtube_summarizer/.github/workflows/windows-installer.yml).
+A Windows build workflow from the original repository can be pointed at this folder by running the same commands from `ytsummarizer_tauri`.
 
-It runs on `windows-latest`, installs `ffmpeg` and NSIS, prepares the bundled Python backend with [tools/prepare_bundle.py](/Users/giers/youtube_summarizer/tools/prepare_bundle.py), builds an NSIS installer, and uploads the result as a workflow artifact named `windows-installer`.
+It should run on `windows-latest`, install `ffmpeg` and NSIS, prepare the bundled Python backend with [tools/prepare_bundle.py](tools/prepare_bundle.py), build an NSIS installer, and upload the result as a workflow artifact named `windows-installer`.
 
 ## Notes
 
 - If Python is not on your `PATH` for development, set `YTS_PYTHON` to the interpreter you want the Tauri backend to use.
 - If you want to test a prebuilt backend executable during development, set `YTS_BACKEND_BIN` to its full path.
-- If `ffmpeg` or `ffprobe` are not on `PATH` during bundle prep, set `YTS_FFMPEG` and `YTS_FFPROBE` to their full paths before running [tools/prepare_bundle.py](/Users/giers/youtube_summarizer/tools/prepare_bundle.py).
+- If `ffmpeg` or `ffprobe` are not on `PATH` during bundle prep, set `YTS_FFMPEG` and `YTS_FFPROBE` to their full paths before running [tools/prepare_bundle.py](tools/prepare_bundle.py).
 - Generated thumbnails and the SQLite database are created on first run in the app's local data directory.

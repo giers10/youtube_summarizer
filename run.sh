@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
+cd "$(dirname "$0")"
+
 # 1. Python venv einrichten
 GREEN="\033[0;32m"
 CYAN="\033[0;36m"

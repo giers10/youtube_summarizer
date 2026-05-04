@@ -4,9 +4,11 @@ import os
 import sqlite3
 import subprocess
 import sys
+from pathlib import Path
 
-DB_FILE = os.path.join(os.path.dirname(__file__), 'summaries.db')
-TRANSLATE_SCRIPT = os.path.join(os.path.dirname(__file__), 'translate_summary.py')
+ROOT = Path(__file__).resolve().parents[1]
+DB_FILE = os.environ.get("YTS_DB_FILE", str(ROOT / "summaries.db"))
+TRANSLATE_SCRIPT = ROOT / "translate_summary.py"
 MODEL = "mistral-small3.1:24b"
 
 def get_entries_needing_translation(conn):
@@ -30,7 +32,7 @@ def translate(summary_text, lang):
         # Führe das Übersetzungsskript aus
         cmd = [
             sys.executable,  # benutzt aktuelles Python
-            TRANSLATE_SCRIPT,
+            str(TRANSLATE_SCRIPT),
             "--summary-file", tmp_summary_path,
             "--lang", lang,
             "--model", MODEL,

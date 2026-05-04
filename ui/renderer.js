@@ -3,6 +3,28 @@ const invoke = tauriApi?.core?.invoke;
 const listen = tauriApi?.event?.listen;
 const convertFileSrc = tauriApi?.core?.convertFileSrc;
 const confirmDialog = tauriApi?.dialog?.confirm;
+const DEFAULT_MASTER_PROMPT = `You are an expert summarizer. Summarize the following video concisely:
+
+Title: {title}
+
+Transcript:
+{transcript}
+
+Summary:`;
+const DEFAULT_TRANSLATION_PROMPTS = {
+  de: `Translate the following summary into German. Only output the translated summary, no explanation or intro. If it's already in the target language, do nothing but repeat it.
+
+Summary:
+{summary}
+
+Translation:`,
+  jp: `Translate the following summary into Japanese. Only output the translated summary, no explanation or intro. If it's already in the target language, do nothing but repeat it.
+
+Summary:
+{summary}
+
+Translation:`
+};
 
 if (!invoke || !listen) {
   throw new Error('Tauri runtime API is unavailable.');
@@ -21,11 +43,12 @@ function toWebviewFileUrl(filePath) {
 window.api = {
   getModels: () => invoke('get_models'),
   getSummaries: () => invoke('get_summaries'),
-  summarizeVideo: (url, useWhisper, model) => invoke('summarize_video', {
+  summarizeVideo: (url, useWhisper, model, masterPrompt) => invoke('summarize_video', {
     request: {
       url,
       useWhisper,
-      model: model || null
+      model: model || null,
+      masterPrompt: masterPrompt || null
     }
   }),
   openExternal: (url) => invoke('open_external', { url }),
@@ -33,16 +56,18 @@ window.api = {
   deleteSummary: (id) => invoke('delete_summary', {
     request: { id }
   }),
-  translateSummary: (id, lang, model) => invoke('translate_summary', {
+  translateSummary: (id, lang, model, promptTemplate) => invoke('translate_summary', {
     request: {
       id,
       lang,
-      model: model || null
+      model: model || null,
+      promptTemplate: promptTemplate || null
     }
   }),
   onSummarizeProgress: (callback) => listen('summarize-progress', (event) => {
     callback(String(event.payload || ''));
-  })
+  }),
+  onOpenSettings: (callback) => listen('open-settings', callback)
 };
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -56,6 +81,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   const paginationBottom = document.getElementById('pagination-bottom');
   const summarizeButton = form.querySelector('button[type="submit"]');
   const autoTranslateCheckbox = document.getElementById('autotranslate-checkbox');
+  const settingsDialog = document.getElementById('settings-dialog');
+  const settingsPanel = settingsDialog.querySelector('.settings-panel');
+  const settingsCloseButton = document.getElementById('settings-close-button');
+  const masterPromptTextarea = document.getElementById('master-prompt-textarea');
+  const resetMasterPromptButton = document.getElementById('reset-master-prompt-button');
+  const translationPromptDeTextarea = document.getElementById('translation-prompt-de-textarea');
+  const translationPromptJpTextarea = document.getElementById('translation-prompt-jp-textarea');
+  const resetTranslationPromptDeButton = document.getElementById('reset-translation-prompt-de-button');
+  const resetTranslationPromptJpButton = document.getElementById('reset-translation-prompt-jp-button');
 
   let fullSummaries = [];
   let currentPage = 1;
@@ -71,14 +105,86 @@ window.addEventListener('DOMContentLoaded', async () => {
     loadingIndicator.textContent = message;
   }
 
+  function getMasterPrompt() {
+    const savedPrompt = localStorage.getItem('masterPrompt');
+    if (savedPrompt && savedPrompt.trim()) {
+      return savedPrompt;
+    }
+    return DEFAULT_MASTER_PROMPT;
+  }
+
+  function getTranslationPrompt(lang) {
+    const savedPrompt = localStorage.getItem(`translationPrompt.${lang}`);
+    if (savedPrompt && savedPrompt.trim()) {
+      return savedPrompt;
+    }
+    return DEFAULT_TRANSLATION_PROMPTS[lang];
+  }
+
+  function syncSettingsFields() {
+    whisperCheckbox.checked = localStorage.getItem('useWhisper') === '0' ? false : true;
+    autoTranslateCheckbox.checked = localStorage.getItem('autoTranslate') === '1' ? true : false;
+    masterPromptTextarea.value = getMasterPrompt();
+    translationPromptDeTextarea.value = getTranslationPrompt('de');
+    translationPromptJpTextarea.value = getTranslationPrompt('jp');
+  }
+
+  function openSettings() {
+    syncSettingsFields();
+    settingsDialog.hidden = false;
+    masterPromptTextarea.focus();
+  }
+
+  function closeSettings() {
+    settingsDialog.hidden = true;
+  }
+
   whisperCheckbox.checked = localStorage.getItem('useWhisper') === '0' ? false : true;
   autoTranslateCheckbox.checked = localStorage.getItem('autoTranslate') === '1' ? true : false;
+  masterPromptTextarea.value = getMasterPrompt();
+  translationPromptDeTextarea.value = getTranslationPrompt('de');
+  translationPromptJpTextarea.value = getTranslationPrompt('jp');
 
   whisperCheckbox.addEventListener('change', () => {
     localStorage.setItem('useWhisper', whisperCheckbox.checked ? '1' : '0');
   });
   autoTranslateCheckbox.addEventListener('change', () => {
     localStorage.setItem('autoTranslate', autoTranslateCheckbox.checked ? '1' : '0');
+  });
+  masterPromptTextarea.addEventListener('input', () => {
+    localStorage.setItem('masterPrompt', masterPromptTextarea.value);
+  });
+  translationPromptDeTextarea.addEventListener('input', () => {
+    localStorage.setItem('translationPrompt.de', translationPromptDeTextarea.value);
+  });
+  translationPromptJpTextarea.addEventListener('input', () => {
+    localStorage.setItem('translationPrompt.jp', translationPromptJpTextarea.value);
+  });
+  resetMasterPromptButton.addEventListener('click', () => {
+    masterPromptTextarea.value = DEFAULT_MASTER_PROMPT;
+    localStorage.setItem('masterPrompt', DEFAULT_MASTER_PROMPT);
+    masterPromptTextarea.focus();
+  });
+  resetTranslationPromptDeButton.addEventListener('click', () => {
+    translationPromptDeTextarea.value = DEFAULT_TRANSLATION_PROMPTS.de;
+    localStorage.setItem('translationPrompt.de', DEFAULT_TRANSLATION_PROMPTS.de);
+    translationPromptDeTextarea.focus();
+  });
+  resetTranslationPromptJpButton.addEventListener('click', () => {
+    translationPromptJpTextarea.value = DEFAULT_TRANSLATION_PROMPTS.jp;
+    localStorage.setItem('translationPrompt.jp', DEFAULT_TRANSLATION_PROMPTS.jp);
+    translationPromptJpTextarea.focus();
+  });
+  settingsCloseButton.addEventListener('click', closeSettings);
+  settingsDialog.addEventListener('click', (event) => {
+    if (!settingsPanel.contains(event.target)) {
+      closeSettings();
+    }
+  });
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !settingsDialog.hidden) {
+      closeSettings();
+    }
   });
 
   function renderSummaries(list) {
@@ -345,6 +451,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       .replace(/^## (.+)$/gm, '<h2>$1</h2>')
       .replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
+    escaped = escaped.replace(/^---$/gm, '<hr>');
+
     escaped = escaped.replace(
       /(^|\n)([ \t]*\* .+(?:\n[ \t]*\* .+)*)/g,
       (_, lead, listBlock) => {
@@ -525,7 +633,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     setActionLinksDisabled(true);
 
     const selectedModel = modelSelect.value;
-    window.api.summarizeVideo(url, useWhisper, selectedModel)
+    window.api.summarizeVideo(url, useWhisper, selectedModel, getMasterPrompt())
       .then((newEntry) => {
         if (!newEntry || !newEntry.id) {
           return window.api.getSummaries().then(setSummaries);
@@ -539,10 +647,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         let translationsOk = true;
         setLoadingMessage('Translating to German (DE)…');
-        return window.api.translateSummary(newEntry.id, 'de', selectedModel)
+        return window.api.translateSummary(newEntry.id, 'de', selectedModel, getTranslationPrompt('de'))
           .then(() => {
             setLoadingMessage('Translating to Japanese (JP)…');
-            return window.api.translateSummary(newEntry.id, 'jp', selectedModel);
+            return window.api.translateSummary(newEntry.id, 'jp', selectedModel, getTranslationPrompt('jp'));
           })
           .catch(err => {
             translationsOk = false;
@@ -575,4 +683,5 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     setLoadingMessage(line);
   });
+  window.api.onOpenSettings(openSettings);
 });

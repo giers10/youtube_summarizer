@@ -1,8 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
-    env, fs,
-    io::{BufRead, BufReader, ErrorKind},
+    env,
+    fs::{self, OpenOptions},
+    io::{BufRead, BufReader, ErrorKind, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Arc, Mutex},
@@ -10,16 +11,22 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use open::that;
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri::menu::{MenuBuilder, SubmenuBuilder};
+use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, State, WebviewWindow};
 
 const DEFAULT_MODEL: &str = "mistral:latest";
 const OLLAMA_TAGS_URL: &str = "http://localhost:11434/api/tags";
 const BACKEND_EXECUTABLE_NAME: &str = "yts-backend";
 const TARGET_TRIPLE: &str = env!("TAURI_BUILD_TARGET");
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone)]
 enum BackendRuntime {
@@ -37,6 +44,7 @@ struct AppState {
     app_dir: PathBuf,
     media_dir: PathBuf,
     db_path: PathBuf,
+    backend_log_path: PathBuf,
     backend: BackendRuntime,
     ffmpeg_path: Option<PathBuf>,
     ffprobe_path: Option<PathBuf>,
@@ -49,6 +57,7 @@ struct SummarizeVideoRequest {
     url: String,
     use_whisper: bool,
     model: Option<String>,
+    master_prompt: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,10 +66,12 @@ struct DeleteSummaryRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TranslateSummaryRequest {
     id: i64,
     lang: String,
     model: Option<String>,
+    prompt_template: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +176,12 @@ fn normalize_model(model: Option<String>) -> String {
         .unwrap_or_else(|| DEFAULT_MODEL.to_string())
 }
 
+fn normalize_prompt_template(prompt: Option<String>) -> Option<String> {
+    prompt
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn now_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -190,15 +207,16 @@ fn platform_executable_name(base_name: &str) -> String {
 fn resolve_resource_file(app: &AppHandle, relative_path: &Path) -> Option<PathBuf> {
     let mut candidates = Vec::new();
 
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        candidates.push(resource_dir.join(relative_path));
+    if let Ok(resource_path) = app.path().resolve(relative_path, BaseDirectory::Resource) {
+        candidates.push(resource_path);
     }
 
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join(relative_path),
-    );
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    candidates.push(manifest_dir.join(relative_path));
+    candidates.push(manifest_dir.join("resources").join(relative_path));
+    if let Ok(project_root) = resolve_project_root() {
+        candidates.push(project_root.join(relative_path));
+    }
 
     candidates.into_iter().find(|path| path.exists())
 }
@@ -218,9 +236,9 @@ fn resolve_backend_binary(app: &AppHandle) -> Option<PathBuf> {
 }
 
 fn resolve_script_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        if resource_dir.join("backend_cli.py").exists() {
-            return Ok(resource_dir);
+    if let Some(resource_file) = resolve_resource_file(app, Path::new("backend_cli.py")) {
+        if let Some(parent) = resource_file.parent() {
+            return Ok(parent.to_path_buf());
         }
     }
 
@@ -292,6 +310,21 @@ fn resolve_whisper_cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(whisper_cache_dir)
 }
 
+fn resolve_log_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .or_else(|_| {
+            app.path()
+                .app_local_data_dir()
+                .map(|path| path.join("logs"))
+        })
+        .map_err(|err| format!("Failed to resolve application log directory: {err}"))?;
+    fs::create_dir_all(&log_dir)
+        .map_err(|err| format!("Failed to create application log directory: {err}"))?;
+    Ok(log_dir)
+}
+
 fn open_connection(state: &AppState) -> Result<Connection, String> {
     Connection::open(&state.db_path).map_err(|err| format!("Failed to open SQLite database: {err}"))
 }
@@ -341,8 +374,10 @@ fn cleanup_artifacts(state: &AppState, audio: Option<&str>, transcript: Option<&
 fn purge_existing_artifacts(state: &AppState) -> Result<(), String> {
     let db = open_connection(state)?;
     let mut stmt = db
-    .prepare("SELECT id, audio, transcript FROM summaries WHERE audio IS NOT NULL OR transcript IS NOT NULL")
-    .map_err(|err| format!("Failed to prepare artifact cleanup query: {err}"))?;
+        .prepare(
+            "SELECT id, audio, transcript FROM summaries WHERE audio IS NOT NULL OR transcript IS NOT NULL",
+        )
+        .map_err(|err| format!("Failed to prepare artifact cleanup query: {err}"))?;
 
     let rows = stmt
         .query_map([], |row| {
@@ -372,6 +407,30 @@ fn purge_existing_artifacts(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
+fn write_startup_error_log(app: &AppHandle, message: &str) {
+    let mut candidates = Vec::new();
+
+    if let Ok(path) = app.path().app_log_dir() {
+        candidates.push(path);
+    }
+    if let Ok(path) = app.path().app_local_data_dir() {
+        candidates.push(path);
+    }
+    candidates.push(env::temp_dir().join("youtube-summarizer"));
+
+    for directory in candidates {
+        if fs::create_dir_all(&directory).is_ok() {
+            let log_path = directory.join("startup-error.log");
+            if fs::write(&log_path, message).is_ok() {
+                eprintln!("Startup failure written to {}", log_path.display());
+                return;
+            }
+        }
+    }
+
+    eprintln!("{message}");
+}
+
 fn ensure_app_state(app: &AppHandle) -> Result<AppState, String> {
     let app_dir = app
         .path()
@@ -386,6 +445,7 @@ fn ensure_app_state(app: &AppHandle) -> Result<AppState, String> {
         ffmpeg_path: resolve_optional_tool_path(app, "YTS_FFMPEG", "ffmpeg"),
         ffprobe_path: resolve_optional_tool_path(app, "YTS_FFPROBE", "ffprobe"),
         whisper_cache_dir: resolve_whisper_cache_dir(app)?,
+        backend_log_path: resolve_log_dir(app)?.join("backend.log"),
         app_dir: app_dir.clone(),
         media_dir,
         db_path: app_dir.join("summaries.db"),
@@ -403,8 +463,47 @@ fn emit_progress(app: &AppHandle, window_label: &str, line: &str) {
     }
 }
 
+fn append_backend_log(log_path: &Path, line: &str) {
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+fn backend_failure_message(stderr_output: &str, fallback: String) -> String {
+    for line in stderr_output.lines().rev() {
+        let trimmed = line.trim();
+        if let Some(message) = trimmed.strip_prefix("[error]") {
+            let message = message.trim();
+            if !message.is_empty() {
+                return message.to_string();
+            }
+        }
+    }
+
+    for line in stderr_output.lines().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("WARNING:")
+            || trimmed.starts_with("Traceback")
+            || trimmed.starts_with("File ")
+            || trimmed.starts_with("During handling")
+        {
+            continue;
+        }
+        if trimmed.starts_with("ERROR:")
+            || trimmed.contains("RuntimeError:")
+            || trimmed.contains("SystemExit:")
+        {
+            return trimmed.to_string();
+        }
+    }
+
+    fallback
+}
+
 fn apply_backend_env(command: &mut Command, state: &AppState) {
     command.env("PYTHONUNBUFFERED", "1");
+    command.env("PYTHONIOENCODING", "utf-8");
     command.env("YTS_WHISPER_CACHE_DIR", &state.whisper_cache_dir);
 
     if let Some(ffmpeg_path) = &state.ffmpeg_path {
@@ -427,6 +526,8 @@ fn build_backend_command(state: &AppState, args: &[String]) -> Command {
 
     command.args(args).current_dir(&state.media_dir);
     apply_backend_env(&mut command, state);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
     command
 }
 
@@ -440,12 +541,20 @@ fn run_backend_json_command(
     let mut command_args = args.to_vec();
     command_args.push("--output-json".to_string());
     command_args.push(output_path.to_string_lossy().into_owned());
+    append_backend_log(
+        &state.backend_log_path,
+        &format!("=== summarize {} ===", command_args.join(" ")),
+    );
 
     let mut child = build_backend_command(state, &command_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|err| format!("Failed to start bundled backend: {err}"))?;
+        .map_err(|err| {
+            let message = format!("Failed to start bundled backend: {err}");
+            append_backend_log(&state.backend_log_path, &message);
+            message
+        })?;
 
     let stdout = child
         .stdout
@@ -456,26 +565,29 @@ fn run_backend_json_command(
         .take()
         .ok_or_else(|| "Backend stderr was not captured.".to_string())?;
     let stderr_buffer = Arc::new(Mutex::new(String::new()));
+    let stdout_log_path = state.backend_log_path.clone();
+    let stderr_log_path = state.backend_log_path.clone();
 
     let stdout_app = app.clone();
     let stdout_label = window_label.to_string();
     let stdout_handle = thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             match line {
-                Ok(line) => emit_progress(&stdout_app, &stdout_label, &line),
+                Ok(line) => {
+                    append_backend_log(&stdout_log_path, &format!("[stdout] {line}"));
+                    emit_progress(&stdout_app, &stdout_label, &line);
+                }
                 Err(_) => break,
             }
         }
     });
 
-    let stderr_app = app.clone();
-    let stderr_label = window_label.to_string();
     let stderr_buffer_clone = Arc::clone(&stderr_buffer);
     let stderr_handle = thread::spawn(move || {
         for line in BufReader::new(stderr).lines() {
             match line {
                 Ok(line) => {
-                    emit_progress(&stderr_app, &stderr_label, &line);
+                    append_backend_log(&stderr_log_path, &format!("[stderr] {line}"));
                     if let Ok(mut buffer) = stderr_buffer_clone.lock() {
                         buffer.push_str(&line);
                         buffer.push('\n');
@@ -486,9 +598,15 @@ fn run_backend_json_command(
         }
     });
 
-    let status = child
-        .wait()
-        .map_err(|err| format!("Failed to wait for bundled backend: {err}"))?;
+    let status = child.wait().map_err(|err| {
+        let message = format!("Failed to wait for bundled backend: {err}");
+        append_backend_log(&state.backend_log_path, &message);
+        message
+    })?;
+    append_backend_log(
+        &state.backend_log_path,
+        &format!("Bundled backend exit status: {status}"),
+    );
 
     let _ = stdout_handle.join();
     let _ = stderr_handle.join();
@@ -498,34 +616,66 @@ fn run_backend_json_command(
             .lock()
             .map(|buffer| buffer.trim().to_string())
             .unwrap_or_else(|_| String::new());
-        let message = if stderr_output.is_empty() {
-            format!("Bundled backend exited with status {status}.")
-        } else {
-            stderr_output
-        };
+        let message = backend_failure_message(
+            &stderr_output,
+            format!("Bundled backend exited with status {status}."),
+        );
+        append_backend_log(
+            &state.backend_log_path,
+            &format!("Backend failure: {message}"),
+        );
         let _ = fs::remove_file(&output_path);
         return Err(message);
     }
 
-    let raw_json = fs::read_to_string(&output_path)
-        .map_err(|err| format!("Failed to read backend output JSON: {err}"))?;
+    let raw_json = fs::read_to_string(&output_path).map_err(|err| {
+        let message = format!("Failed to read backend output JSON: {err}");
+        append_backend_log(&state.backend_log_path, &message);
+        message
+    })?;
     let _ = fs::remove_file(&output_path);
 
-    serde_json::from_str(&raw_json).map_err(|err| format!("Invalid backend output JSON: {err}"))
+    serde_json::from_str(&raw_json).map_err(|err| {
+        let message = format!("Invalid backend output JSON: {err}");
+        append_backend_log(&state.backend_log_path, &message);
+        message
+    })
 }
 
 fn run_backend_text_command(state: &AppState, args: &[String]) -> Result<String, String> {
-    let output = build_backend_command(state, args)
-        .output()
-        .map_err(|err| format!("Failed to start translation backend: {err}"))?;
+    append_backend_log(
+        &state.backend_log_path,
+        &format!("=== translate {} ===", args.join(" ")),
+    );
+    let output = build_backend_command(state, args).output().map_err(|err| {
+        let message = format!("Failed to start translation backend: {err}");
+        append_backend_log(&state.backend_log_path, &message);
+        message
+    })?;
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        append_backend_log(&state.backend_log_path, &format!("[stdout] {line}"));
+    }
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        append_backend_log(&state.backend_log_path, &format!("[stderr] {line}"));
+    }
+    append_backend_log(
+        &state.backend_log_path,
+        &format!("Translation backend exit status: {}", output.status),
+    );
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
+        let message = if stderr.is_empty() {
             format!("Translation backend exited with status {}.", output.status)
         } else {
             stderr
-        });
+        };
+        append_backend_log(
+            &state.backend_log_path,
+            &format!("Translation failure: {message}"),
+        );
+        return Err(message);
     }
 
     let translation = String::from_utf8(output.stdout)
@@ -533,7 +683,9 @@ fn run_backend_text_command(state: &AppState, args: &[String]) -> Result<String,
         .trim()
         .to_string();
     if translation.is_empty() {
-        return Err("Translation backend returned an empty result.".to_string());
+        let message = "Translation backend returned an empty result.".to_string();
+        append_backend_log(&state.backend_log_path, &message);
+        return Err(message);
     }
 
     Ok(translation)
@@ -559,19 +711,42 @@ fn summarize_video_inner(
     window_label: &str,
     request: SummarizeVideoRequest,
 ) -> Result<SummaryEntry, String> {
-    let model = normalize_model(request.model);
+    let SummarizeVideoRequest {
+        url,
+        use_whisper,
+        model,
+        master_prompt,
+    } = request;
+    let model = normalize_model(model);
     let mut args = vec![
         "summarize".to_string(),
         "--url".to_string(),
-        request.url,
+        url,
         "--model".to_string(),
         model,
     ];
-    if !request.use_whisper {
+    if !use_whisper {
         args.push("--no-whisper".to_string());
     }
 
-    let info = run_backend_json_command(state, app, window_label, &args)?;
+    let prompt_path = if let Some(prompt) = normalize_prompt_template(master_prompt) {
+        let path = state
+            .app_dir
+            .join(format!("tmp_prompt_{}.txt", now_millis()));
+        fs::write(&path, prompt)
+            .map_err(|err| format!("Failed to write temporary prompt file: {err}"))?;
+        args.push("--prompt-template-file".to_string());
+        args.push(path.to_string_lossy().into_owned());
+        Some(path)
+    } else {
+        None
+    };
+
+    let result = run_backend_json_command(state, app, window_label, &args);
+    if let Some(path) = prompt_path {
+        let _ = fs::remove_file(path);
+    }
+    let info = result?;
     cleanup_artifacts(state, info.audio.as_deref(), info.transcript.as_deref());
 
     let db = open_connection(state)?;
@@ -601,11 +776,17 @@ fn translate_summary_inner(
     state: &AppState,
     request: TranslateSummaryRequest,
 ) -> Result<SummaryEntry, String> {
+    let TranslateSummaryRequest {
+        id,
+        lang,
+        model,
+        prompt_template,
+    } = request;
     let db = open_connection(state)?;
     let summary_text = db
         .query_row(
             "SELECT summary_en FROM summaries WHERE id = ?",
-            [request.id],
+            [id],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()
@@ -613,29 +794,49 @@ fn translate_summary_inner(
         .flatten()
         .ok_or_else(|| "No English summary found for translation.".to_string())?;
 
-    let tmp_summary_path =
-        state
-            .app_dir
-            .join(format!("tmp_summary_{}_{}.txt", request.id, now_millis()));
+    let tmp_summary_path = state
+        .app_dir
+        .join(format!("tmp_summary_{}_{}.txt", id, now_millis()));
     fs::write(&tmp_summary_path, summary_text)
         .map_err(|err| format!("Failed to write temporary summary file: {err}"))?;
 
-    let model = normalize_model(request.model);
-    let args = vec![
+    let model = normalize_model(model);
+    let mut args = vec![
         "translate".to_string(),
         "--summary-file".to_string(),
         tmp_summary_path.to_string_lossy().into_owned(),
         "--lang".to_string(),
-        request.lang.clone(),
+        lang.clone(),
         "--model".to_string(),
         model,
     ];
+    let tmp_prompt_path = if let Some(prompt) = normalize_prompt_template(prompt_template) {
+        let path = state.app_dir.join(format!(
+            "tmp_translation_prompt_{}_{}.txt",
+            id,
+            now_millis()
+        ));
+        if let Err(err) = fs::write(&path, prompt) {
+            let _ = fs::remove_file(&tmp_summary_path);
+            return Err(format!(
+                "Failed to write temporary translation prompt file: {err}"
+            ));
+        }
+        args.push("--prompt-template-file".to_string());
+        args.push(path.to_string_lossy().into_owned());
+        Some(path)
+    } else {
+        None
+    };
     let result = run_backend_text_command(state, &args);
 
     let _ = fs::remove_file(&tmp_summary_path);
+    if let Some(path) = tmp_prompt_path {
+        let _ = fs::remove_file(path);
+    }
     let translation = result?;
 
-    let column = match request.lang.as_str() {
+    let column = match lang.as_str() {
         "de" => "summary_de",
         "jp" => "summary_jp",
         _ => return Err("Unsupported language code.".to_string()),
@@ -643,11 +844,11 @@ fn translate_summary_inner(
 
     db.execute(
         &format!("UPDATE summaries SET {column} = ? WHERE id = ?"),
-        params![translation, request.id],
+        params![translation, id],
     )
     .map_err(|err| format!("Failed to save translated summary: {err}"))?;
 
-    get_entry_by_id(state, request.id)
+    get_entry_by_id(state, id)
 }
 
 #[tauri::command]
@@ -733,13 +934,57 @@ fn open_file(file_path: String) -> Result<(), String> {
     that(path).map_err(|err| format!("Failed to open file: {err}"))
 }
 
+fn install_app_menu(app: &mut tauri::App) -> tauri::Result<()> {
+    let handle = app.handle();
+    let menu_builder = MenuBuilder::new(handle);
+    #[cfg(target_os = "macos")]
+    let menu_builder = {
+        let app_menu = SubmenuBuilder::new(handle, "YouTube Summarizer")
+            .hide()
+            .hide_others()
+            .show_all()
+            .separator()
+            .quit()
+            .build()?;
+        menu_builder.item(&app_menu)
+    };
+    let settings_menu = SubmenuBuilder::new(handle, "Settings")
+        .text("open_settings", "Settings...")
+        .build()?;
+    let edit_menu = SubmenuBuilder::new(handle, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let menu = menu_builder.item(&settings_menu).item(&edit_menu).build()?;
+    app.set_menu(menu)?;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .on_menu_event(|app, event| {
+            if event.id() == "open_settings" {
+                let _ = app.emit_to("main", "open-settings", ());
+            }
+        })
         .setup(|app| {
-            let state = ensure_app_state(app.handle())?;
-            app.manage(state);
-            Ok(())
+            install_app_menu(app)?;
+            match ensure_app_state(app.handle()) {
+                Ok(state) => {
+                    app.manage(state);
+                    Ok(())
+                }
+                Err(err) => {
+                    write_startup_error_log(app.handle(), &err);
+                    Err(err.into())
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_models,

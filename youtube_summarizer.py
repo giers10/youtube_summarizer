@@ -35,8 +35,10 @@ import re
 import time
 import json
 import glob
+import math
 import subprocess
 import multiprocessing
+import threading
 import requests
 import yt_dlp
 import webvtt
@@ -62,12 +64,47 @@ NUM_SLICES = 8
 OVERLAP_SEC = 1
 MAX_OVERLAP_WORDS = 7
 WHISPER_MODEL = "small"  # e.g. "small", "medium", "large-v3" …
+OLLAMA_CHARS_PER_TOKEN = 3.5
+OLLAMA_OUTPUT_TOKEN_BUDGET = 2048
+OLLAMA_CONTEXT_BUCKETS = (4096, 8192, 16384, 32768, 65536)
+DEFAULT_SUMMARY_PROMPT_TEMPLATE = """You are an expert summarizer. Summarize the following video concisely:
+
+Title: {title}
+
+Transcript:
+{transcript}
+
+Summary:"""
 
 
 def debug_print(*args, **kwargs):
     """Print debug messages when DEBUG is enabled."""
     if DEBUG:
         print("[DEBUG]", *args, **kwargs, file=sys.stderr)
+
+
+class ProgressHeartbeat:
+    """Emit periodic progress while a blocking backend operation is active."""
+
+    def __init__(self, message_fn, interval: float = 15.0):
+        self.message_fn = message_fn
+        self.interval = interval
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._stop.set()
+        self._thread.join(timeout=1.0)
+
+    def _run(self):
+        while not self._stop.wait(self.interval):
+            message = self.message_fn()
+            if message:
+                print(message, flush=True)
 
 
 def get_ffmpeg_binary() -> str:
@@ -80,6 +117,31 @@ def get_ffprobe_binary() -> str:
     """Return the ffprobe executable path, preferring a bundled override."""
     value = os.environ.get("YTS_FFPROBE", "").strip()
     return value or "ffprobe"
+
+
+def get_ffmpeg_directory() -> Optional[str]:
+    """Return the directory containing the configured ffmpeg binary."""
+    value = os.environ.get("YTS_FFMPEG", "").strip()
+    if not value:
+        return None
+    if os.path.isfile(value):
+        return os.path.dirname(value)
+    return value
+
+
+def get_yt_dlp_ffmpeg_location() -> Optional[str]:
+    """Return an ffmpeg location suitable for yt_dlp postprocessors."""
+    return get_ffmpeg_directory()
+
+
+def ensure_ffmpeg_on_path() -> None:
+    """Expose bundled ffmpeg to libraries that shell out to plain `ffmpeg`."""
+    ffmpeg_dir = get_ffmpeg_directory()
+    if not ffmpeg_dir:
+        return
+    path_entries = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if entry]
+    if ffmpeg_dir not in path_entries:
+        os.environ["PATH"] = os.pathsep.join([ffmpeg_dir, *path_entries])
 
 
 def get_whisper_download_root() -> Optional[str]:
@@ -286,6 +348,9 @@ def _download_audio_with_yt_dlp(url: str, vid: str, extractor_args: Optional[dic
     }
     if extractor_args:
         opts["extractor_args"] = extractor_args
+    ffmpeg_location = get_yt_dlp_ffmpeg_location()
+    if ffmpeg_location:
+        opts["ffmpeg_location"] = ffmpeg_location
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
     if not os.path.exists(audio_fn):
@@ -295,7 +360,8 @@ def _download_audio_with_yt_dlp(url: str, vid: str, extractor_args: Optional[dic
 
 def download_video_audio(url: str, vid: str) -> str:
     """Download the best available audio for a YouTube video."""
-    print(f"📥 Downloading audio from {url} …")
+    ensure_ffmpeg_on_path()
+    print(f"Downloading audio from {url} ...")
 
     # Clean up any stale partials that can trigger HTTP 416 resume errors.
     _cleanup_audio_artifacts(vid)
@@ -322,16 +388,63 @@ def download_video_audio(url: str, vid: str) -> str:
 
 def get_audio_duration(path: str) -> float:
     """Return the duration of an audio file using ffprobe."""
-    res = subprocess.run([
+    try:
+        file_size = os.path.getsize(path)
+    except OSError:
+        file_size = None
+
+    ffprobe_args = [
         get_ffprobe_binary(), "-v", "error", "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1", path
-    ], capture_output=True, text=True)
-    return float(res.stdout.strip())
+    ]
+    res = subprocess.run(
+        ffprobe_args,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    print(f"[ffprobe] command: {ffprobe_args}", file=sys.stderr, flush=True)
+    print(f"[ffprobe] target: {path}", file=sys.stderr, flush=True)
+    print(f"[ffprobe] target size bytes: {file_size}", file=sys.stderr, flush=True)
+    print(f"[ffprobe] returncode: {res.returncode}", file=sys.stderr, flush=True)
+    print("[ffprobe] stdout raw begin", file=sys.stderr, flush=True)
+    if res.stdout:
+        sys.stderr.write(res.stdout)
+        if not res.stdout.endswith("\n"):
+            sys.stderr.write("\n")
+        sys.stderr.flush()
+    else:
+        print("<empty>", file=sys.stderr, flush=True)
+    print("[ffprobe] stdout raw end", file=sys.stderr, flush=True)
+    print("[ffprobe] stderr raw begin", file=sys.stderr, flush=True)
+    if res.stderr:
+        sys.stderr.write(res.stderr)
+        if not res.stderr.endswith("\n"):
+            sys.stderr.write("\n")
+        sys.stderr.flush()
+    else:
+        print("<empty>", file=sys.stderr, flush=True)
+    print("[ffprobe] stderr raw end", file=sys.stderr, flush=True)
+
+    stdout_value = res.stdout.strip()
+    try:
+        return float(stdout_value)
+    except ValueError:
+        match = re.search(r"[-+]?\d+(?:[.,]\d+)?", stdout_value or res.stderr)
+        if match:
+            return float(match.group(0).replace(",", "."))
+
+    raise RuntimeError(
+        "ffprobe did not return a parseable duration "
+        f"(returncode={res.returncode}, stdout={stdout_value!r}, stderr={res.stderr.strip()!r})"
+    )
 
 
 def slice_audio(audio_path: str, vid: str) -> List[Tuple[str, float, float]]:
     """Slice a long audio file into overlapping chunks for Whisper."""
-    print("Slicing audio …")
+    print("Slicing audio ...")
     duration = get_audio_duration(audio_path)
     length = duration / NUM_SLICES
     slices = []
@@ -351,6 +464,7 @@ def slice_audio(audio_path: str, vid: str) -> List[Tuple[str, float, float]]:
 
 def transcribe_slice(args: Tuple[str, int, str, str]) -> str:
     """Transcribe a single audio slice using Whisper and save to a text file."""
+    ensure_ffmpeg_on_path()
     slice_path, idx, model_name, vid = args
     if whisper is None:
         raise RuntimeError("Whisper package is required but not installed")
@@ -398,9 +512,10 @@ def clean_temp(pattern: str) -> None:
 
 def whisper_transcript(url: str, vid: str) -> str:
     """Run the Whisper pipeline and return the final transcript text."""
+    ensure_ffmpeg_on_path()
     audio = download_video_audio(url, vid)
     slices = slice_audio(audio, vid)
-    print("✍️  Transcribing using Whisper...", flush=True)
+    print("Transcribing using Whisper...", flush=True)
     args = [(p, i, WHISPER_MODEL, vid) for i, (p, _, _) in enumerate(slices)]
     with multiprocessing.Pool(len(slices)) as pool:
         t_files = pool.map(transcribe_slice, args)
@@ -415,17 +530,36 @@ def whisper_transcript(url: str, vid: str) -> str:
 # Ollama‑Summarizer
 # -----------------------
 
-def summarize_with_ollama(title: str, transcript: str, model: str = "mistral:latest") -> str:
+def render_summary_prompt(title: str, transcript: str, prompt_template: Optional[str] = None) -> str:
+    template = (prompt_template or DEFAULT_SUMMARY_PROMPT_TEMPLATE).strip()
+    prompt = template.replace("{title}", title).replace("{transcript}", transcript)
+    if "{title}" not in template:
+        prompt = f"{prompt}\n\nTitle: {title}"
+    if "{transcript}" not in template:
+        prompt = f"{prompt}\n\nTranscript:\n{transcript}"
+    return prompt
+
+
+def choose_ollama_num_ctx(prompt: str, output_budget: int = OLLAMA_OUTPUT_TOKEN_BUDGET) -> int:
+    estimated_input_tokens = math.ceil(len(prompt) / OLLAMA_CHARS_PER_TOKEN)
+    needed_tokens = estimated_input_tokens + output_budget
+    for bucket in OLLAMA_CONTEXT_BUCKETS:
+        if needed_tokens <= bucket:
+            return bucket
+    return OLLAMA_CONTEXT_BUCKETS[-1]
+
+
+def summarize_with_ollama(
+    title: str,
+    transcript: str,
+    model: str = "mistral:latest",
+    prompt_template: Optional[str] = None,
+) -> str:
     """
     Send video title and transcript text to Ollama and return the summary string.
     """
     debug_print(f"Preparing summary with model {model}, transcript length={len(transcript)}")
-    prompt = (
-        "You are an expert summarizer. Summarize the following video concisely:\n\n"
-        f"Title: {title}\n\n"
-        f"Transcript:\n{transcript}\n\n"
-        "Summary:"
-    )
+    prompt = render_summary_prompt(title, transcript, prompt_template)
     debug_print(prompt)
     payload = {
         "model": model,
@@ -433,21 +567,50 @@ def summarize_with_ollama(title: str, transcript: str, model: str = "mistral:lat
             {"role": "system", "content": "You are an intelligent summarizer."},
             {"role": "user", "content": prompt}
         ],
+        "options": {
+            "num_ctx": choose_ollama_num_ctx(prompt)
+        },
         "stream": True
     }
-    debug_print("Sending request to Ollama …")
-    resp = requests.post("http://localhost:11434/api/chat", json=payload, stream=True)
-    debug_print(f"Ollama status: {resp.status_code}")
+    debug_print("Sending request to Ollama ...")
     summary = ""
-    for line in resp.iter_lines(decode_unicode=True):
-        if not line:
-            continue
-        try:
-            msg = json.loads(line).get("message", {}).get("content", "")
-            summary += msg
-        except Exception:
-            continue
+    last_progress_chars = 0
+
+    def heartbeat_message() -> str:
+        if summary:
+            return f"Ollama is generating summary... {len(summary)} characters received."
+        return "Waiting for Ollama to start responding..."
+
+    try:
+        with ProgressHeartbeat(heartbeat_message):
+            resp = requests.post(
+                "http://localhost:11434/api/chat",
+                json=payload,
+                stream=True,
+                timeout=(10, 1800),
+            )
+            debug_print(f"Ollama status: {resp.status_code}")
+            resp.raise_for_status()
+            for line in resp.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line).get("message", {}).get("content", "")
+                    summary += msg
+                    if len(summary) - last_progress_chars >= 1000:
+                        last_progress_chars = len(summary)
+                        print(
+                            f"Ollama is generating summary... {last_progress_chars} characters received.",
+                            flush=True,
+                        )
+                except Exception:
+                    continue
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Ollama request failed: {exc}") from exc
+    if not summary.strip():
+        raise RuntimeError("Ollama returned an empty summary.")
     debug_print(f"Summary generated, length={len(summary)}")
+    print("Summary generated.", flush=True)
     return summary
 
 
@@ -517,7 +680,13 @@ def download_thumbnail(vid: str, thumbnail_url: str) -> Optional[str]:
 # Main
 # -----------------------
 
-def process_video(url: str, use_whisper: bool, model: str = "mistral:latest", output_json: Optional[str] = None) -> dict:
+def process_video(
+    url: str,
+    use_whisper: bool,
+    model: str = "mistral:latest",
+    output_json: Optional[str] = None,
+    prompt_template: Optional[str] = None,
+) -> dict:
     """
     Core processing routine.  Retrieves metadata, obtains transcript via the
     selected workflow, generates a summary using Ollama and writes the
@@ -552,17 +721,17 @@ def process_video(url: str, use_whisper: bool, model: str = "mistral:latest", ou
 
     # Fetch transcript
     if use_whisper:
-        print("🤖  Using Whisper parallel transcription…")
+        print("Using Whisper parallel transcription...")
         transcript_text = whisper_transcript(url, vid)
         if not transcript_text.strip():
             raise SystemExit("Whisper transcription failed or empty.")
     else:
-        print("▶️  Using classic API/subtitle workflow…")
+        print("Using classic API/subtitle workflow...")
         # Try API first
         try:
             transcript_text = get_transcript_api(vid)
         except Exception:
-            print("API failed, falling back to subtitles…")
+            print("API failed, falling back to subtitles...")
             transcript_text = get_subtitles_via_yt_dlp(url)
         if not transcript_text:
             raise SystemExit("No transcript/subtitles available.")
@@ -601,8 +770,8 @@ def process_video(url: str, use_whisper: bool, model: str = "mistral:latest", ou
             audio_filename = None
 
     # Generate summary
-    print("✍️  Generating summary with Ollama…", flush=True)
-    summary_text = summarize_with_ollama(title, transcript_text, model)
+    print("Generating summary with Ollama...", flush=True)
+    summary_text = summarize_with_ollama(title, transcript_text, model, prompt_template)
 
     # Create metadata dictionary
     meta = {
@@ -625,7 +794,13 @@ def process_video(url: str, use_whisper: bool, model: str = "mistral:latest", ou
     return meta
 
 
-def rewrite_summary(title: str, transcript_file: str, model: str = "mistral:latest", output_json: Optional[str] = None) -> dict:
+def rewrite_summary(
+    title: str,
+    transcript_file: str,
+    model: str = "mistral:latest",
+    output_json: Optional[str] = None,
+    prompt_template: Optional[str] = None,
+) -> dict:
     """
     Regenerate a summary from an existing transcript file using the specified model.
 
@@ -648,7 +823,7 @@ def rewrite_summary(title: str, transcript_file: str, model: str = "mistral:late
     with open(transcript_file, 'r', encoding='utf-8') as f:
         transcript_text = f.read()
     debug_print(f"Rewriting summary using model {model} for {transcript_file}")
-    summary_text = summarize_with_ollama(title, transcript_text, model)
+    summary_text = summarize_with_ollama(title, transcript_text, model, prompt_template)
     meta = {'summary': summary_text}
     if output_json:
         with open(output_json, 'w', encoding='utf-8') as f:
@@ -669,17 +844,25 @@ def main():
                         help="Ollama model to use for summarization (default: mistral:latest)")
     parser.add_argument('--transcript-file', type=str, default=None,
                         help="Path to an existing transcript file; when provided the script will skip transcription and only generate a summary.")
+    parser.add_argument('--prompt-template', type=str, default=None,
+                        help="Prompt template for the summary LLM call.")
+    parser.add_argument('--prompt-template-file', type=str, default=None,
+                        help="Path to a text file containing the prompt template.")
     args = parser.parse_args()
 
     use_whisper = not args.no_ai
+    prompt_template = args.prompt_template
+    if args.prompt_template_file:
+        with open(args.prompt_template_file, 'r', encoding='utf-8') as f:
+            prompt_template = f.read()
 
     try:
         # If a transcript file is provided, skip the normal processing and only rewrite summary
         if args.transcript_file:
             vid, title, _ = fetch_video_metadata(args.url)
-            meta = rewrite_summary(title, args.transcript_file, args.model, args.output_json)
+            meta = rewrite_summary(title, args.transcript_file, args.model, args.output_json, prompt_template)
         else:
-            meta = process_video(args.url, use_whisper, args.model, args.output_json)
+            meta = process_video(args.url, use_whisper, args.model, args.output_json, prompt_template)
         # If no JSON output specified, print metadata as JSON to stdout
         if not args.output_json:
             print(json.dumps(meta, ensure_ascii=False, indent=2))

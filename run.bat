@@ -1,5 +1,6 @@
 @echo off
 setlocal
+cd /d "%~dp0"
 
 REM 1. Prüfen, ob venv existiert, sonst erstellen
 if not exist venv (
