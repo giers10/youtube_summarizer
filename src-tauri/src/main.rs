@@ -23,6 +23,7 @@ use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, State, WebviewWind
 
 const DEFAULT_MODEL: &str = "mistral:latest";
 const OLLAMA_TAGS_URL: &str = "http://localhost:11434/api/tags";
+#[cfg(not(debug_assertions))]
 const BACKEND_EXECUTABLE_NAME: &str = "yts-backend";
 const DISCORD_MAX_MESSAGE_LENGTH: usize = 2000;
 const DISCORD_MESSAGE_DELAY_MS: u64 = 1000;
@@ -241,6 +242,7 @@ fn resolve_backend_override() -> Option<PathBuf> {
     None
 }
 
+#[cfg(not(debug_assertions))]
 fn resolve_bundled_backend_binary(app: &AppHandle) -> Option<PathBuf> {
     let relative_path = Path::new("backend")
         .join(TARGET_TRIPLE)
