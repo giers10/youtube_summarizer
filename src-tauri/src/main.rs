@@ -230,7 +230,7 @@ fn resolve_resource_file(app: &AppHandle, relative_path: &Path) -> Option<PathBu
     candidates.into_iter().find(|path| path.exists())
 }
 
-fn resolve_backend_binary(app: &AppHandle) -> Option<PathBuf> {
+fn resolve_backend_override() -> Option<PathBuf> {
     if let Ok(path) = env::var("YTS_BACKEND_BIN") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
@@ -238,6 +238,10 @@ fn resolve_backend_binary(app: &AppHandle) -> Option<PathBuf> {
         }
     }
 
+    None
+}
+
+fn resolve_bundled_backend_binary(app: &AppHandle) -> Option<PathBuf> {
     let relative_path = Path::new("backend")
         .join(TARGET_TRIPLE)
         .join(platform_executable_name(BACKEND_EXECUTABLE_NAME));
@@ -284,7 +288,19 @@ fn resolve_python_command(script_dir: &Path) -> Result<PathBuf, String> {
 }
 
 fn resolve_backend_runtime(app: &AppHandle) -> Result<BackendRuntime, String> {
-    if let Some(executable) = resolve_backend_binary(app) {
+    if let Some(executable) = resolve_backend_override() {
+        return Ok(BackendRuntime::Bundled { executable });
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let script_dir = resolve_script_dir(app)?;
+        let python = resolve_python_command(&script_dir)?;
+        return Ok(BackendRuntime::Python { python, script_dir });
+    }
+
+    #[cfg(not(debug_assertions))]
+    if let Some(executable) = resolve_bundled_backend_binary(app) {
         return Ok(BackendRuntime::Bundled { executable });
     }
 
