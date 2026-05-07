@@ -296,17 +296,19 @@ fn resolve_backend_runtime(app: &AppHandle) -> Result<BackendRuntime, String> {
     {
         let script_dir = resolve_script_dir(app)?;
         let python = resolve_python_command(&script_dir)?;
-        return Ok(BackendRuntime::Python { python, script_dir });
+        Ok(BackendRuntime::Python { python, script_dir })
     }
 
     #[cfg(not(debug_assertions))]
-    if let Some(executable) = resolve_bundled_backend_binary(app) {
-        return Ok(BackendRuntime::Bundled { executable });
-    }
+    {
+        if let Some(executable) = resolve_bundled_backend_binary(app) {
+            return Ok(BackendRuntime::Bundled { executable });
+        }
 
-    let script_dir = resolve_script_dir(app)?;
-    let python = resolve_python_command(&script_dir)?;
-    Ok(BackendRuntime::Python { python, script_dir })
+        let script_dir = resolve_script_dir(app)?;
+        let python = resolve_python_command(&script_dir)?;
+        Ok(BackendRuntime::Python { python, script_dir })
+    }
 }
 
 fn resolve_optional_tool_path(app: &AppHandle, env_name: &str, tool_name: &str) -> Option<PathBuf> {
