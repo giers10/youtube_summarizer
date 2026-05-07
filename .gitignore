@@ -43,3 +43,4 @@ src-tauri/resources/backend/*
 src-tauri/resources/ffmpeg/*
 !src-tauri/resources/ffmpeg/.gitkeep
 *.o
+*.dylib
