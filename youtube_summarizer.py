@@ -266,10 +266,92 @@ def remove_empty_lines(lines: List[str]) -> List[str]:
     return [l for l in lines if l.strip()]
 
 
-def get_subtitles_via_yt_dlp(url: str) -> Optional[str]:
+YOUTUBE_AUTH_ERROR_MARKERS = (
+    "sign in to confirm",
+    "not a bot",
+    "login_required",
+    "use --cookies-from-browser",
+    "use --cookies for the authentication",
+)
+
+
+def parse_cookies_from_browser_spec(spec: Optional[str]) -> Optional[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]:
+    """Parse yt-dlp's browser cookie spec into the tuple YoutubeDL expects."""
+    if not spec:
+        return None
+
+    raw = spec.strip()
+    if not raw:
+        return None
+
+    container = None
+    browser_part = raw
+    if "::" in browser_part:
+        browser_part, container = browser_part.split("::", 1)
+        container = container or None
+
+    profile = None
+    if ":" in browser_part:
+        browser_part, profile = browser_part.split(":", 1)
+        profile = profile or None
+
+    keyring = None
+    if "+" in browser_part:
+        browser, keyring = browser_part.split("+", 1)
+        keyring = keyring or None
+    else:
+        browser = browser_part
+
+    browser = browser.strip().lower()
+    if not browser:
+        raise ValueError("Browser cookie source is missing a browser name.")
+    return (browser, profile, keyring, container)
+
+
+def apply_ytdlp_cookie_options(
+    opts: dict,
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> dict:
+    """Attach cookie options to a yt-dlp option dictionary."""
+    if cookies_file:
+        opts["cookiefile"] = cookies_file
+    browser_spec = parse_cookies_from_browser_spec(cookies_from_browser)
+    if browser_spec:
+        opts["cookiesfrombrowser"] = browser_spec
+    return opts
+
+
+def exception_chain_text(exc: BaseException) -> str:
+    parts = []
+    current = exc
+    while current:
+        parts.append(str(current))
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts).lower()
+
+
+def is_youtube_auth_error(exc: BaseException) -> bool:
+    text = exception_chain_text(exc)
+    return any(marker in text for marker in YOUTUBE_AUTH_ERROR_MARKERS)
+
+
+def has_cookie_source(cookies_from_browser: Optional[str], cookies_file: Optional[str]) -> bool:
+    return bool((cookies_from_browser or "").strip() or (cookies_file or "").strip())
+
+
+def get_subtitles_via_yt_dlp(
+    url: str,
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> Optional[str]:
     """Try to fetch subtitles via yt_dlp when API transcripts fail."""
     debug_print(f"Fetching metadata via yt‑dlp for URL: {url}")
-    opts = {'skip_download': True, 'quiet': True, 'ignoreerrors': True}
+    opts = apply_ytdlp_cookie_options(
+        {'skip_download': True, 'quiet': True, 'ignoreerrors': True},
+        cookies_from_browser,
+        cookies_file,
+    )
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
     available = list(info.get('subtitles', {})) + list(info.get('automatic_captions', {}))
@@ -282,7 +364,7 @@ def get_subtitles_via_yt_dlp(url: str) -> Optional[str]:
 
     for lang in langs:
         debug_print(f"Trying subtitle language {lang}")
-        dl_opts = {
+        dl_opts = apply_ytdlp_cookie_options({
             'skip_download': True,
             'writesubtitles': True,
             'writeautomaticsub': True,
@@ -290,7 +372,7 @@ def get_subtitles_via_yt_dlp(url: str) -> Optional[str]:
             'subtitlelangs': [lang],
             'outtmpl': "transcript.%(language)s.%(ext)s",
             'quiet': True,
-        }
+        }, cookies_from_browser, cookies_file)
         with yt_dlp.YoutubeDL(dl_opts) as ydl:
             ydl.download([url])
 
@@ -327,10 +409,16 @@ def _cleanup_audio_artifacts(vid: str) -> None:
             pass
 
 
-def _download_audio_with_yt_dlp(url: str, vid: str, extractor_args: Optional[dict] = None) -> str:
+def _download_audio_with_yt_dlp(
+    url: str,
+    vid: str,
+    extractor_args: Optional[dict] = None,
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> str:
     """Download audio via yt_dlp and extract to wav."""
     audio_fn = f"audio_{vid}.wav"
-    opts = {
+    opts = apply_ytdlp_cookie_options({
         "format": "bestaudio/best",
         "outtmpl": f"audio_{vid}.%(ext)s",
         "quiet": True,
@@ -345,7 +433,7 @@ def _download_audio_with_yt_dlp(url: str, vid: str, extractor_args: Optional[dic
             "key": "FFmpegExtractAudio",
             "preferredcodec": "wav",
         }],
-    }
+    }, cookies_from_browser, cookies_file)
     if extractor_args:
         opts["extractor_args"] = extractor_args
     ffmpeg_location = get_yt_dlp_ffmpeg_location()
@@ -358,7 +446,12 @@ def _download_audio_with_yt_dlp(url: str, vid: str, extractor_args: Optional[dic
     return audio_fn
 
 
-def download_video_audio(url: str, vid: str) -> str:
+def download_video_audio(
+    url: str,
+    vid: str,
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> str:
     """Download the best available audio for a YouTube video."""
     ensure_ffmpeg_on_path()
     print(f"Downloading audio from {url} ...")
@@ -375,7 +468,13 @@ def download_video_audio(url: str, vid: str) -> str:
     for label, extractor_args in attempts:
         try:
             debug_print(f"yt_dlp audio attempt: {label}")
-            audio_fn = _download_audio_with_yt_dlp(url, vid, extractor_args)
+            audio_fn = _download_audio_with_yt_dlp(
+                url,
+                vid,
+                extractor_args,
+                cookies_from_browser,
+                cookies_file,
+            )
             debug_print(f"Audio saved as {audio_fn}")
             return audio_fn
         except Exception as e:
@@ -510,10 +609,15 @@ def clean_temp(pattern: str) -> None:
             pass
 
 
-def whisper_transcript(url: str, vid: str) -> str:
+def whisper_transcript(
+    url: str,
+    vid: str,
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> str:
     """Run the Whisper pipeline and return the final transcript text."""
     ensure_ffmpeg_on_path()
-    audio = download_video_audio(url, vid)
+    audio = download_video_audio(url, vid, cookies_from_browser, cookies_file)
     slices = slice_audio(audio, vid)
     print("Transcribing using Whisper...", flush=True)
     args = [(p, i, WHISPER_MODEL, vid) for i, (p, _, _) in enumerate(slices)]
@@ -618,12 +722,17 @@ def summarize_with_ollama(
 # Video metadata and thumbnail download
 # -----------------------
 
-def fetch_video_metadata(url: str) -> Tuple[str, str, str]:
+def fetch_video_metadata(
+    url: str,
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> Tuple[str, str, str]:
     """
     Fetch the title, thumbnail URL and video ID for a YouTube URL using yt_dlp.
     Returns a tuple: (video_id, title, thumbnail_url)
     """
-    with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+    opts = apply_ytdlp_cookie_options({'quiet': True}, cookies_from_browser, cookies_file)
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
     vid = info.get('id')
     title = info.get('title', f"Video {vid}")
@@ -631,13 +740,18 @@ def fetch_video_metadata(url: str) -> Tuple[str, str, str]:
     return vid, title, thumbnail_url
 
 
-def fetch_channel_name(url: str) -> Optional[str]:
+def fetch_channel_name(
+    url: str,
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> Optional[str]:
     """
     Retrieve the channel or uploader name for a YouTube video using yt_dlp.
     Returns None if it cannot be determined.
     """
     try:
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+        opts = apply_ytdlp_cookie_options({'quiet': True}, cookies_from_browser, cookies_file)
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
         # Try channel, uploader, then return None
         return info.get('channel') or info.get('uploader')
@@ -686,6 +800,34 @@ def process_video(
     model: str = "mistral:latest",
     output_json: Optional[str] = None,
     prompt_template: Optional[str] = None,
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> dict:
+    try:
+        return process_video_once(url, use_whisper, model, output_json, prompt_template)
+    except Exception as exc:
+        if has_cookie_source(cookies_from_browser, cookies_file) and is_youtube_auth_error(exc):
+            print("YouTube requested sign-in; retrying with selected cookies...", flush=True)
+            return process_video_once(
+                url,
+                use_whisper,
+                model,
+                output_json,
+                prompt_template,
+                cookies_from_browser,
+                cookies_file,
+            )
+        raise
+
+
+def process_video_once(
+    url: str,
+    use_whisper: bool,
+    model: str = "mistral:latest",
+    output_json: Optional[str] = None,
+    prompt_template: Optional[str] = None,
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
 ) -> dict:
     """
     Core processing routine.  Retrieves metadata, obtains transcript via the
@@ -712,17 +854,17 @@ def process_video(
     dict
         A dictionary containing metadata about the processed video.
     """
-    vid, title, thumb_url = fetch_video_metadata(url)
+    vid, title, thumb_url = fetch_video_metadata(url, cookies_from_browser, cookies_file)
     if not vid:
         raise SystemExit("Invalid YouTube URL.")
 
     # Fetch the channel/uploader name
-    channel_name = fetch_channel_name(url)
+    channel_name = fetch_channel_name(url, cookies_from_browser, cookies_file)
 
     # Fetch transcript
     if use_whisper:
         print("Using Whisper parallel transcription...")
-        transcript_text = whisper_transcript(url, vid)
+        transcript_text = whisper_transcript(url, vid, cookies_from_browser, cookies_file)
         if not transcript_text.strip():
             raise SystemExit("Whisper transcription failed or empty.")
     else:
@@ -732,7 +874,7 @@ def process_video(
             transcript_text = get_transcript_api(vid)
         except Exception:
             print("API failed, falling back to subtitles...")
-            transcript_text = get_subtitles_via_yt_dlp(url)
+            transcript_text = get_subtitles_via_yt_dlp(url, cookies_from_browser, cookies_file)
         if not transcript_text:
             raise SystemExit("No transcript/subtitles available.")
 
