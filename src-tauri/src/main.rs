@@ -384,57 +384,129 @@ fn windows_browser_paths(id: &str) -> Vec<PathBuf> {
     let local_app_data = env::var("LocalAppData").ok().map(PathBuf::from);
     let mut paths = Vec::new();
 
-    let mut add_under_program_files = |relative: &str| {
-        if let Some(root) = &program_files {
-            paths.push(root.join(relative));
-        }
-        if let Some(root) = &program_files_x86 {
-            paths.push(root.join(relative));
-        }
-    };
-    let mut add_under_local_app_data = |relative: &str| {
-        if let Some(root) = &local_app_data {
-            paths.push(root.join(relative));
-        }
-    };
-
     match id {
         "brave" => {
-            add_under_program_files("BraveSoftware/Brave-Browser/Application/brave.exe");
-            add_under_local_app_data("BraveSoftware/Brave-Browser/Application/brave.exe");
+            push_windows_program_paths(
+                &mut paths,
+                &program_files,
+                &program_files_x86,
+                "BraveSoftware/Brave-Browser/Application/brave.exe",
+            );
+            push_windows_local_path(
+                &mut paths,
+                &local_app_data,
+                "BraveSoftware/Brave-Browser/Application/brave.exe",
+            );
         }
         "chrome" => {
-            add_under_program_files("Google/Chrome/Application/chrome.exe");
-            add_under_local_app_data("Google/Chrome/Application/chrome.exe");
+            push_windows_program_paths(
+                &mut paths,
+                &program_files,
+                &program_files_x86,
+                "Google/Chrome/Application/chrome.exe",
+            );
+            push_windows_local_path(
+                &mut paths,
+                &local_app_data,
+                "Google/Chrome/Application/chrome.exe",
+            );
         }
         "chromium" => {
-            add_under_program_files("Chromium/Application/chrome.exe");
-            add_under_local_app_data("Chromium/Application/chrome.exe");
+            push_windows_program_paths(
+                &mut paths,
+                &program_files,
+                &program_files_x86,
+                "Chromium/Application/chrome.exe",
+            );
+            push_windows_local_path(
+                &mut paths,
+                &local_app_data,
+                "Chromium/Application/chrome.exe",
+            );
         }
         "edge" => {
-            add_under_program_files("Microsoft/Edge/Application/msedge.exe");
-            add_under_local_app_data("Microsoft/Edge/Application/msedge.exe");
+            push_windows_program_paths(
+                &mut paths,
+                &program_files,
+                &program_files_x86,
+                "Microsoft/Edge/Application/msedge.exe",
+            );
+            push_windows_local_path(
+                &mut paths,
+                &local_app_data,
+                "Microsoft/Edge/Application/msedge.exe",
+            );
         }
         "firefox" => {
-            add_under_program_files("Mozilla Firefox/firefox.exe");
-            add_under_local_app_data("Mozilla Firefox/firefox.exe");
+            push_windows_program_paths(
+                &mut paths,
+                &program_files,
+                &program_files_x86,
+                "Mozilla Firefox/firefox.exe",
+            );
+            push_windows_local_path(&mut paths, &local_app_data, "Mozilla Firefox/firefox.exe");
         }
         "opera" => {
-            add_under_local_app_data("Programs/Opera/opera.exe");
-            add_under_program_files("Opera/opera.exe");
+            push_windows_local_path(&mut paths, &local_app_data, "Programs/Opera/opera.exe");
+            push_windows_program_paths(
+                &mut paths,
+                &program_files,
+                &program_files_x86,
+                "Opera/opera.exe",
+            );
         }
         "vivaldi" => {
-            add_under_program_files("Vivaldi/Application/vivaldi.exe");
-            add_under_local_app_data("Vivaldi/Application/vivaldi.exe");
+            push_windows_program_paths(
+                &mut paths,
+                &program_files,
+                &program_files_x86,
+                "Vivaldi/Application/vivaldi.exe",
+            );
+            push_windows_local_path(
+                &mut paths,
+                &local_app_data,
+                "Vivaldi/Application/vivaldi.exe",
+            );
         }
         "whale" => {
-            add_under_program_files("Naver/Naver Whale/Application/whale.exe");
-            add_under_local_app_data("Naver/Naver Whale/Application/whale.exe");
+            push_windows_program_paths(
+                &mut paths,
+                &program_files,
+                &program_files_x86,
+                "Naver/Naver Whale/Application/whale.exe",
+            );
+            push_windows_local_path(
+                &mut paths,
+                &local_app_data,
+                "Naver/Naver Whale/Application/whale.exe",
+            );
         }
         _ => {}
     }
 
     paths
+}
+
+#[cfg(target_os = "windows")]
+fn push_windows_program_paths(
+    paths: &mut Vec<PathBuf>,
+    program_files: &Option<PathBuf>,
+    program_files_x86: &Option<PathBuf>,
+    relative: &str,
+) {
+    if let Some(root) = program_files {
+        paths.push(root.join(relative));
+    }
+    if let Some(root) = program_files_x86 {
+        paths.push(root.join(relative));
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn push_windows_local_path(paths: &mut Vec<PathBuf>, local_app_data: &Option<PathBuf>, relative: &str) {
+    if let Some(root) = local_app_data {
+        paths.push(root.join(relative));
+    }
 }
 
 #[cfg(target_os = "linux")]
