@@ -26,6 +26,17 @@ Summary:
 
 Translation:`
 };
+const YOUTUBE_COOKIE_SOURCE_KEY = 'youtubeCookieSource';
+const YOUTUBE_COOKIE_ERROR_PATTERNS = [
+  'sign in to confirm',
+  'not a bot',
+  'login_required',
+  'cookies-from-browser',
+  'cookies for the authentication',
+  'could not load cookies',
+  'failed to decrypt',
+  'permission denied'
+];
 
 if (!invoke || !listen) {
   throw new Error('Tauri runtime API is unavailable.');
@@ -116,12 +127,14 @@ function toWebviewFileUrl(filePath) {
 window.api = {
   getModels: () => invoke('get_models'),
   getSummaries: () => invoke('get_summaries'),
-  summarizeVideo: (url, useWhisper, model, masterPrompt) => invoke('summarize_video', {
+  getYoutubeCookieSources: () => invoke('get_youtube_cookie_sources'),
+  summarizeVideo: (url, useWhisper, model, masterPrompt, cookieSource) => invoke('summarize_video', {
     request: {
       url,
       useWhisper,
       model: model || null,
-      masterPrompt: masterPrompt || null
+      masterPrompt: masterPrompt || null,
+      cookieSource: cookieSource || null
     }
   }),
   openExternal: (url) => invoke('open_external', { url }),
