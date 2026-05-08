@@ -1539,6 +1539,7 @@ fn summarize_video_inner(
         use_whisper,
         model,
         master_prompt,
+        cookie_source,
     } = request;
     let model = normalize_model(model);
     let mut args = vec![
@@ -1551,6 +1552,7 @@ fn summarize_video_inner(
     if !use_whisper {
         args.push("--no-whisper".to_string());
     }
+    args.extend(build_youtube_cookie_args(cookie_source)?);
 
     let prompt_path = if let Some(prompt) = normalize_prompt_template(master_prompt) {
         let path = state
