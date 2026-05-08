@@ -274,6 +274,14 @@ YOUTUBE_AUTH_ERROR_MARKERS = (
     "use --cookies for the authentication",
 )
 
+YOUTUBE_JS_CHALLENGE_ERROR_MARKERS = (
+    "n challenge solving failed",
+    "only images are available",
+    "requested format is not available",
+    "remote component challenge solver",
+    "sabr streaming",
+)
+
 
 def parse_cookies_from_browser_spec(
     spec: Optional[str],
@@ -314,13 +322,17 @@ def apply_ytdlp_cookie_options(
     opts: dict,
     cookies_from_browser: Optional[str] = None,
     cookies_file: Optional[str] = None,
+    use_js_challenge_fallback: bool = False,
 ) -> dict:
-    """Attach cookie options to a yt-dlp option dictionary."""
+    """Attach cookie and challenge-solver options to a yt-dlp option dictionary."""
     if cookies_file:
         opts["cookiefile"] = cookies_file
     browser_spec = parse_cookies_from_browser_spec(cookies_from_browser)
     if browser_spec:
         opts["cookiesfrombrowser"] = browser_spec
+    if use_js_challenge_fallback:
+        opts["js_runtimes"] = ["deno", "node"]
+        opts["remote_components"] = ["ejs:github"]
     return opts
 
 
@@ -338,6 +350,11 @@ def is_youtube_auth_error(exc: BaseException) -> bool:
     return any(marker in text for marker in YOUTUBE_AUTH_ERROR_MARKERS)
 
 
+def is_youtube_js_challenge_error(exc: BaseException) -> bool:
+    text = exception_chain_text(exc)
+    return any(marker in text for marker in YOUTUBE_JS_CHALLENGE_ERROR_MARKERS)
+
+
 def has_cookie_source(cookies_from_browser: Optional[str], cookies_file: Optional[str]) -> bool:
     return bool((cookies_from_browser or "").strip() or (cookies_file or "").strip())
 
@@ -346,6 +363,7 @@ def get_subtitles_via_yt_dlp(
     url: str,
     cookies_from_browser: Optional[str] = None,
     cookies_file: Optional[str] = None,
+    use_js_challenge_fallback: bool = False,
 ) -> Optional[str]:
     """Try to fetch subtitles via yt_dlp when API transcripts fail."""
     debug_print(f"Fetching metadata via yt‑dlp for URL: {url}")
@@ -353,6 +371,7 @@ def get_subtitles_via_yt_dlp(
         {'skip_download': True, 'quiet': True, 'ignoreerrors': True},
         cookies_from_browser,
         cookies_file,
+        use_js_challenge_fallback,
     )
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -374,7 +393,7 @@ def get_subtitles_via_yt_dlp(
             'subtitlelangs': [lang],
             'outtmpl': "transcript.%(language)s.%(ext)s",
             'quiet': True,
-        }, cookies_from_browser, cookies_file)
+        }, cookies_from_browser, cookies_file, use_js_challenge_fallback)
         with yt_dlp.YoutubeDL(dl_opts) as ydl:
             ydl.download([url])
 
