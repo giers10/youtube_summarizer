@@ -436,6 +436,7 @@ def _download_audio_with_yt_dlp(
     extractor_args: Optional[dict] = None,
     cookies_from_browser: Optional[str] = None,
     cookies_file: Optional[str] = None,
+    use_js_challenge_fallback: bool = False,
 ) -> str:
     """Download audio via yt_dlp and extract to wav."""
     audio_fn = f"audio_{vid}.wav"
@@ -454,7 +455,7 @@ def _download_audio_with_yt_dlp(
             "key": "FFmpegExtractAudio",
             "preferredcodec": "wav",
         }],
-    }, cookies_from_browser, cookies_file)
+    }, cookies_from_browser, cookies_file, use_js_challenge_fallback)
     if extractor_args:
         opts["extractor_args"] = extractor_args
     ffmpeg_location = get_yt_dlp_ffmpeg_location()
@@ -472,6 +473,7 @@ def download_video_audio(
     vid: str,
     cookies_from_browser: Optional[str] = None,
     cookies_file: Optional[str] = None,
+    use_js_challenge_fallback: bool = False,
 ) -> str:
     """Download the best available audio for a YouTube video."""
     ensure_ffmpeg_on_path()
@@ -495,6 +497,7 @@ def download_video_audio(
                 extractor_args,
                 cookies_from_browser,
                 cookies_file,
+                use_js_challenge_fallback,
             )
             debug_print(f"Audio saved as {audio_fn}")
             return audio_fn
