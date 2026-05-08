@@ -1711,6 +1711,11 @@ fn get_summaries(state: State<'_, AppState>) -> Result<Vec<SummaryEntry>, String
 }
 
 #[tauri::command]
+fn get_youtube_cookie_sources() -> Vec<YoutubeCookieBrowserOption> {
+    get_youtube_cookie_browser_options_inner()
+}
+
+#[tauri::command]
 async fn summarize_video(
     state: State<'_, AppState>,
     window: WebviewWindow,
@@ -1825,6 +1830,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_models,
             get_summaries,
+            get_youtube_cookie_sources,
             summarize_video,
             delete_summary,
             translate_summary,
