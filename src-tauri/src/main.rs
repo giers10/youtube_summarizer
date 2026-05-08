@@ -503,7 +503,11 @@ fn push_windows_program_paths(
 }
 
 #[cfg(target_os = "windows")]
-fn push_windows_local_path(paths: &mut Vec<PathBuf>, local_app_data: &Option<PathBuf>, relative: &str) {
+fn push_windows_local_path(
+    paths: &mut Vec<PathBuf>,
+    local_app_data: &Option<PathBuf>,
+    relative: &str,
+) {
     if let Some(root) = local_app_data {
         paths.push(root.join(relative));
     }
