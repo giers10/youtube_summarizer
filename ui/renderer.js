@@ -529,9 +529,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   function openSettings() {
-    syncSettingsFields();
-    settingsDialog.hidden = false;
-    discordWebhookInput.focus();
+    refreshYoutubeCookieSourceOptions().finally(() => {
+      syncSettingsFields();
+      settingsDialog.hidden = false;
+      discordWebhookInput.focus();
+    });
   }
 
   function closeSettings() {
@@ -1072,7 +1074,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     setActionLinksDisabled(true);
 
     const selectedModel = modelSelect.value;
-    window.api.summarizeVideo(url, useWhisper, selectedModel, getMasterPrompt())
+    summarizeWithCookieFlow(url, useWhisper, selectedModel, getMasterPrompt())
       .then((newEntry) => {
         if (!newEntry || !newEntry.id) {
           return window.api.getSummaries().then(setSummaries);
