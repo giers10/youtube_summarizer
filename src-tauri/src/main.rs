@@ -249,6 +249,89 @@ fn normalize_prompt_template(prompt: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn clean_optional_string(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn is_supported_cookie_browser(browser: &str) -> bool {
+    YOUTUBE_COOKIE_BROWSER_OPTIONS
+        .iter()
+        .any(|option| option.id == browser)
+}
+
+fn is_supported_linux_keyring(keyring: &str) -> bool {
+    matches!(
+        keyring,
+        "basictext" | "gnomekeyring" | "kwallet" | "kwallet5" | "kwallet6"
+    )
+}
+
+fn expand_user_path(raw_path: &str) -> PathBuf {
+    if let Some(rest) = raw_path.strip_prefix("~/") {
+        if let Ok(home) = env::var("HOME").or_else(|_| env::var("USERPROFILE")) {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(raw_path)
+}
+
+fn build_youtube_cookie_args(
+    cookie_source: Option<YoutubeCookieSourceRequest>,
+) -> Result<Vec<String>, String> {
+    let Some(source) = cookie_source else {
+        return Ok(Vec::new());
+    };
+
+    match source.source_type.trim() {
+        "browser" => {
+            let browser = clean_optional_string(&source.browser)
+                .map(|value| value.to_ascii_lowercase())
+                .ok_or_else(|| "Select a browser cookie source.".to_string())?;
+            if !is_supported_cookie_browser(&browser) {
+                return Err(format!("Unsupported browser cookie source: {browser}"));
+            }
+
+            let mut spec = browser;
+            if let Some(keyring) = clean_optional_string(&source.keyring)
+                .map(|value| value.to_ascii_lowercase())
+            {
+                if !is_supported_linux_keyring(&keyring) {
+                    return Err(format!("Unsupported Linux keyring: {keyring}"));
+                }
+                spec.push('+');
+                spec.push_str(&keyring);
+            }
+            if let Some(profile) = clean_optional_string(&source.profile) {
+                spec.push(':');
+                spec.push_str(&profile);
+            }
+            if let Some(container) = clean_optional_string(&source.container) {
+                spec.push_str("::");
+                spec.push_str(&container);
+            }
+            Ok(vec!["--cookies-from-browser".to_string(), spec])
+        }
+        "cookiesFile" => {
+            let cookies_file = clean_optional_string(&source.cookies_file)
+                .ok_or_else(|| "Enter a cookies.txt file path.".to_string())?;
+            let path = expand_user_path(&cookies_file);
+            if !path.exists() {
+                return Err(format!("Cookies file does not exist: {}", path.display()));
+            }
+            Ok(vec![
+                "--cookies-file".to_string(),
+                path.to_string_lossy().into_owned(),
+            ])
+        }
+        "" => Ok(Vec::new()),
+        other => Err(format!("Unsupported YouTube cookie source type: {other}")),
+    }
+}
+
 fn now_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
