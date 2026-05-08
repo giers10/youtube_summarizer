@@ -638,10 +638,17 @@ def whisper_transcript(
     vid: str,
     cookies_from_browser: Optional[str] = None,
     cookies_file: Optional[str] = None,
+    use_js_challenge_fallback: bool = False,
 ) -> str:
     """Run the Whisper pipeline and return the final transcript text."""
     ensure_ffmpeg_on_path()
-    audio = download_video_audio(url, vid, cookies_from_browser, cookies_file)
+    audio = download_video_audio(
+        url,
+        vid,
+        cookies_from_browser,
+        cookies_file,
+        use_js_challenge_fallback,
+    )
     slices = slice_audio(audio, vid)
     print("Transcribing using Whisper...", flush=True)
     args = [(p, i, WHISPER_MODEL, vid) for i, (p, _, _) in enumerate(slices)]
