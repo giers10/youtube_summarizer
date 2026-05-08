@@ -827,8 +827,8 @@ def process_video(
     try:
         return process_video_once(url, use_whisper, model, output_json, prompt_template)
     except Exception as exc:
-        if has_cookie_source(cookies_from_browser, cookies_file) and is_youtube_auth_error(exc):
-            print("YouTube requested sign-in; retrying with selected cookies...", flush=True)
+        if is_youtube_js_challenge_error(exc):
+            print("YouTube player challenge failed; retrying with Node/EJS challenge fallback...", flush=True)
             return process_video_once(
                 url,
                 use_whisper,
@@ -837,7 +837,38 @@ def process_video(
                 prompt_template,
                 cookies_from_browser,
                 cookies_file,
+                True,
             )
+
+        if has_cookie_source(cookies_from_browser, cookies_file) and is_youtube_auth_error(exc):
+            print("YouTube requested sign-in; retrying with selected cookies...", flush=True)
+            try:
+                return process_video_once(
+                    url,
+                    use_whisper,
+                    model,
+                    output_json,
+                    prompt_template,
+                    cookies_from_browser,
+                    cookies_file,
+                )
+            except Exception as cookie_exc:
+                if is_youtube_js_challenge_error(cookie_exc):
+                    print(
+                        "YouTube player challenge failed; retrying with Node/EJS challenge fallback...",
+                        flush=True,
+                    )
+                    return process_video_once(
+                        url,
+                        use_whisper,
+                        model,
+                        output_json,
+                        prompt_template,
+                        cookies_from_browser,
+                        cookies_file,
+                        True,
+                    )
+                raise
         raise
 
 
@@ -849,6 +880,7 @@ def process_video_once(
     prompt_template: Optional[str] = None,
     cookies_from_browser: Optional[str] = None,
     cookies_file: Optional[str] = None,
+    use_js_challenge_fallback: bool = False,
 ) -> dict:
     """
     Core processing routine.  Retrieves metadata, obtains transcript via the
@@ -875,17 +907,33 @@ def process_video_once(
     dict
         A dictionary containing metadata about the processed video.
     """
-    vid, title, thumb_url = fetch_video_metadata(url, cookies_from_browser, cookies_file)
+    vid, title, thumb_url = fetch_video_metadata(
+        url,
+        cookies_from_browser,
+        cookies_file,
+        use_js_challenge_fallback,
+    )
     if not vid:
         raise SystemExit("Invalid YouTube URL.")
 
     # Fetch the channel/uploader name
-    channel_name = fetch_channel_name(url, cookies_from_browser, cookies_file)
+    channel_name = fetch_channel_name(
+        url,
+        cookies_from_browser,
+        cookies_file,
+        use_js_challenge_fallback,
+    )
 
     # Fetch transcript
     if use_whisper:
         print("Using Whisper parallel transcription...")
-        transcript_text = whisper_transcript(url, vid, cookies_from_browser, cookies_file)
+        transcript_text = whisper_transcript(
+            url,
+            vid,
+            cookies_from_browser,
+            cookies_file,
+            use_js_challenge_fallback,
+        )
         if not transcript_text.strip():
             raise SystemExit("Whisper transcription failed or empty.")
     else:
@@ -895,7 +943,12 @@ def process_video_once(
             transcript_text = get_transcript_api(vid)
         except Exception:
             print("API failed, falling back to subtitles...")
-            transcript_text = get_subtitles_via_yt_dlp(url, cookies_from_browser, cookies_file)
+            transcript_text = get_subtitles_via_yt_dlp(
+                url,
+                cookies_from_browser,
+                cookies_file,
+                use_js_challenge_fallback,
+            )
         if not transcript_text:
             raise SystemExit("No transcript/subtitles available.")
 
