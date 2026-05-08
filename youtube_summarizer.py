@@ -757,12 +757,18 @@ def fetch_video_metadata(
     url: str,
     cookies_from_browser: Optional[str] = None,
     cookies_file: Optional[str] = None,
+    use_js_challenge_fallback: bool = False,
 ) -> Tuple[str, str, str]:
     """
     Fetch the title, thumbnail URL and video ID for a YouTube URL using yt_dlp.
     Returns a tuple: (video_id, title, thumbnail_url)
     """
-    opts = apply_ytdlp_cookie_options({'quiet': True}, cookies_from_browser, cookies_file)
+    opts = apply_ytdlp_cookie_options(
+        {'quiet': True},
+        cookies_from_browser,
+        cookies_file,
+        use_js_challenge_fallback,
+    )
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
     vid = info.get('id')
@@ -775,13 +781,19 @@ def fetch_channel_name(
     url: str,
     cookies_from_browser: Optional[str] = None,
     cookies_file: Optional[str] = None,
+    use_js_challenge_fallback: bool = False,
 ) -> Optional[str]:
     """
     Retrieve the channel or uploader name for a YouTube video using yt_dlp.
     Returns None if it cannot be determined.
     """
     try:
-        opts = apply_ytdlp_cookie_options({'quiet': True}, cookies_from_browser, cookies_file)
+        opts = apply_ytdlp_cookie_options(
+            {'quiet': True},
+            cookies_from_browser,
+            cookies_file,
+            use_js_challenge_fallback,
+        )
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
         # Try channel, uploader, then return None
