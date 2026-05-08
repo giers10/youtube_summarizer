@@ -256,6 +256,137 @@ fn now_millis() -> u128 {
         .as_millis()
 }
 
+fn get_youtube_cookie_browser_options_inner() -> Vec<YoutubeCookieBrowserOption> {
+    YOUTUBE_COOKIE_BROWSER_OPTIONS
+        .iter()
+        .copied()
+        .filter(|option| browser_is_available(option.id))
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn browser_is_available(id: &str) -> bool {
+    let app_names: &[&str] = match id {
+        "brave" => &["Brave Browser.app"],
+        "chrome" => &["Google Chrome.app"],
+        "chromium" => &["Chromium.app"],
+        "edge" => &["Microsoft Edge.app"],
+        "firefox" => &["Firefox.app"],
+        "opera" => &["Opera.app"],
+        "safari" => &["Safari.app"],
+        "vivaldi" => &["Vivaldi.app"],
+        "whale" => &["Whale.app", "Naver Whale.app"],
+        _ => return false,
+    };
+
+    let mut roots = vec![PathBuf::from("/Applications")];
+    if let Ok(home) = env::var("HOME") {
+        roots.push(PathBuf::from(home).join("Applications"));
+    }
+
+    roots
+        .iter()
+        .any(|root| app_names.iter().any(|name| root.join(name).exists()))
+}
+
+#[cfg(target_os = "windows")]
+fn browser_is_available(id: &str) -> bool {
+    windows_browser_paths(id).iter().any(|path| path.exists())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_browser_paths(id: &str) -> Vec<PathBuf> {
+    let program_files = env::var("ProgramFiles").ok().map(PathBuf::from);
+    let program_files_x86 = env::var("ProgramFiles(x86)").ok().map(PathBuf::from);
+    let local_app_data = env::var("LocalAppData").ok().map(PathBuf::from);
+    let mut paths = Vec::new();
+
+    let mut add_under_program_files = |relative: &str| {
+        if let Some(root) = &program_files {
+            paths.push(root.join(relative));
+        }
+        if let Some(root) = &program_files_x86 {
+            paths.push(root.join(relative));
+        }
+    };
+    let mut add_under_local_app_data = |relative: &str| {
+        if let Some(root) = &local_app_data {
+            paths.push(root.join(relative));
+        }
+    };
+
+    match id {
+        "brave" => {
+            add_under_program_files("BraveSoftware/Brave-Browser/Application/brave.exe");
+            add_under_local_app_data("BraveSoftware/Brave-Browser/Application/brave.exe");
+        }
+        "chrome" => {
+            add_under_program_files("Google/Chrome/Application/chrome.exe");
+            add_under_local_app_data("Google/Chrome/Application/chrome.exe");
+        }
+        "chromium" => {
+            add_under_program_files("Chromium/Application/chrome.exe");
+            add_under_local_app_data("Chromium/Application/chrome.exe");
+        }
+        "edge" => {
+            add_under_program_files("Microsoft/Edge/Application/msedge.exe");
+            add_under_local_app_data("Microsoft/Edge/Application/msedge.exe");
+        }
+        "firefox" => {
+            add_under_program_files("Mozilla Firefox/firefox.exe");
+            add_under_local_app_data("Mozilla Firefox/firefox.exe");
+        }
+        "opera" => {
+            add_under_local_app_data("Programs/Opera/opera.exe");
+            add_under_program_files("Opera/opera.exe");
+        }
+        "vivaldi" => {
+            add_under_program_files("Vivaldi/Application/vivaldi.exe");
+            add_under_local_app_data("Vivaldi/Application/vivaldi.exe");
+        }
+        "whale" => {
+            add_under_program_files("Naver/Naver Whale/Application/whale.exe");
+            add_under_local_app_data("Naver/Naver Whale/Application/whale.exe");
+        }
+        _ => {}
+    }
+
+    paths
+}
+
+#[cfg(target_os = "linux")]
+fn browser_is_available(id: &str) -> bool {
+    let commands: &[&str] = match id {
+        "brave" => &["brave-browser", "brave"],
+        "chrome" => &["google-chrome", "google-chrome-stable", "chrome"],
+        "chromium" => &["chromium", "chromium-browser"],
+        "edge" => &["microsoft-edge", "microsoft-edge-stable"],
+        "firefox" => &["firefox"],
+        "opera" => &["opera"],
+        "vivaldi" => &["vivaldi", "vivaldi-stable"],
+        "whale" => &["whale"],
+        "safari" => &[],
+        _ => &[],
+    };
+    commands.iter().any(|command| command_exists(command))
+}
+
+#[cfg(target_os = "linux")]
+fn command_exists(command: &str) -> bool {
+    if command.contains(std::path::MAIN_SEPARATOR) {
+        return Path::new(command).exists();
+    }
+    let Some(paths) = env::var_os("PATH") else {
+        return false;
+    };
+    env::split_paths(&paths).any(|path| path.join(command).exists())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn browser_is_available(_id: &str) -> bool {
+    false
+}
+
 fn resolve_project_root() -> Result<PathBuf, String> {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
