@@ -317,6 +317,20 @@
 	      font-size: 14px;
 	      font-weight: bold;
 	    }
+	    .settings-field-group[hidden] {
+	      display: none;
+	    }
+	    .settings-help {
+	      margin: 6px 0 0;
+	      font-size: 13px;
+	      line-height: 1.35;
+	      color: #be123c;
+	    }
+	    .settings-inline-grid {
+	      display: grid;
+	      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	      gap: 10px;
+	    }
 	    .settings-prompt-textarea {
 	      width: 100%;
 	      min-height: 260px;
@@ -349,6 +363,9 @@
 	    .settings-actions button:hover {
 	      background: #9f1239;
 	      color: #fff;
+	    }
+	    .cookie-panel {
+	      width: min(560px, 100%);
 	    }
 	  </style>
 	</head>
@@ -386,6 +403,57 @@
 		        autocomplete="off"
 		        spellcheck="false"
 		      />
+		      <label for="youtube-cookie-source-select" class="settings-field-label">YouTube Cookies</label>
+		      <select id="youtube-cookie-source-select" class="settings-input"></select>
+		      <div class="settings-inline-grid">
+		        <div class="settings-field-group">
+		          <label for="youtube-cookie-profile-input" class="settings-field-label">Browser Profile</label>
+		          <input
+		            type="text"
+		            id="youtube-cookie-profile-input"
+		            class="settings-input"
+		            placeholder="Default"
+		            autocomplete="off"
+		            spellcheck="false"
+		          />
+		        </div>
+		        <div class="settings-field-group">
+		          <label for="youtube-cookie-container-input" class="settings-field-label">Firefox Container</label>
+		          <input
+		            type="text"
+		            id="youtube-cookie-container-input"
+		            class="settings-input"
+		            placeholder="none"
+		            autocomplete="off"
+		            spellcheck="false"
+		          />
+		        </div>
+		      </div>
+		      <div class="settings-field-group">
+		        <label for="youtube-cookie-keyring-select" class="settings-field-label">Linux Keyring</label>
+		        <select id="youtube-cookie-keyring-select" class="settings-input">
+		          <option value="">Default</option>
+		          <option value="basictext">basictext</option>
+		          <option value="gnomekeyring">gnomekeyring</option>
+		          <option value="kwallet">kwallet</option>
+		          <option value="kwallet5">kwallet5</option>
+		          <option value="kwallet6">kwallet6</option>
+		        </select>
+		      </div>
+		      <div class="settings-field-group">
+		        <label for="youtube-cookie-file-input" class="settings-field-label">Cookies File</label>
+		        <input
+		          type="text"
+		          id="youtube-cookie-file-input"
+		          class="settings-input"
+		          placeholder="/path/to/cookies.txt"
+		          autocomplete="off"
+		          spellcheck="false"
+		        />
+		      </div>
+		      <div class="settings-actions">
+		        <button type="button" id="clear-youtube-cookie-source-button">Clear YouTube cookies source</button>
+		      </div>
 		      <label for="master-prompt-textarea" class="settings-field-label">Master Prompt</label>
 	      <textarea id="master-prompt-textarea" class="settings-prompt-textarea" spellcheck="false"></textarea>
 	      <div class="settings-actions">
@@ -400,6 +468,66 @@
 	      <textarea id="translation-prompt-jp-textarea" class="settings-prompt-textarea compact" spellcheck="false"></textarea>
 	      <div class="settings-actions">
 	        <button type="button" id="reset-translation-prompt-jp-button">Reset to default</button>
+	      </div>
+	    </section>
+	  </div>
+	  <div id="cookie-dialog" class="settings-dialog cookie-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="cookie-title">
+	    <section class="settings-panel cookie-panel">
+	      <div class="settings-panel-header">
+	        <h2 id="cookie-title">YouTube Sign-In Required</h2>
+	      </div>
+	      <p id="cookie-message" class="settings-help"></p>
+	      <label for="cookie-source-select" class="settings-field-label">Cookie Source</label>
+	      <select id="cookie-source-select" class="settings-input"></select>
+	      <div class="settings-inline-grid">
+	        <div class="settings-field-group">
+	          <label for="cookie-profile-input" class="settings-field-label">Browser Profile</label>
+	          <input
+	            type="text"
+	            id="cookie-profile-input"
+	            class="settings-input"
+	            placeholder="Default"
+	            autocomplete="off"
+	            spellcheck="false"
+	          />
+	        </div>
+	        <div class="settings-field-group">
+	          <label for="cookie-container-input" class="settings-field-label">Firefox Container</label>
+	          <input
+	            type="text"
+	            id="cookie-container-input"
+	            class="settings-input"
+	            placeholder="none"
+	            autocomplete="off"
+	            spellcheck="false"
+	          />
+	        </div>
+	      </div>
+	      <div class="settings-field-group">
+	        <label for="cookie-keyring-select" class="settings-field-label">Linux Keyring</label>
+	        <select id="cookie-keyring-select" class="settings-input">
+	          <option value="">Default</option>
+	          <option value="basictext">basictext</option>
+	          <option value="gnomekeyring">gnomekeyring</option>
+	          <option value="kwallet">kwallet</option>
+	          <option value="kwallet5">kwallet5</option>
+	          <option value="kwallet6">kwallet6</option>
+	        </select>
+	      </div>
+	      <div class="settings-field-group">
+	        <label for="cookie-file-input" class="settings-field-label">Cookies File</label>
+	        <input
+	          type="text"
+	          id="cookie-file-input"
+	          class="settings-input"
+	          placeholder="/path/to/cookies.txt"
+	          autocomplete="off"
+	          spellcheck="false"
+	        />
+	      </div>
+	      <div class="settings-actions">
+	        <button type="button" id="cookie-cancel-button">Cancel</button>
+	        <button type="button" id="cookie-use-button">Use Source</button>
 	      </div>
 	    </section>
 	  </div>
