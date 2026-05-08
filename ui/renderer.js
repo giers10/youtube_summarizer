@@ -180,19 +180,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   const resetMasterPromptButton = document.getElementById('reset-master-prompt-button');
   const discordWebhookInput = document.getElementById('discord-webhook-url-input');
   const youtubeCookieSourceSelect = document.getElementById('youtube-cookie-source-select');
-  const youtubeCookieProfileInput = document.getElementById('youtube-cookie-profile-input');
-  const youtubeCookieContainerInput = document.getElementById('youtube-cookie-container-input');
-  const youtubeCookieKeyringSelect = document.getElementById('youtube-cookie-keyring-select');
-  const youtubeCookieFileInput = document.getElementById('youtube-cookie-file-input');
   const clearYoutubeCookieSourceButton = document.getElementById('clear-youtube-cookie-source-button');
   const cookieDialog = document.getElementById('cookie-dialog');
   const cookiePanel = cookieDialog.querySelector('.cookie-panel');
   const cookieMessage = document.getElementById('cookie-message');
   const cookieSourceSelect = document.getElementById('cookie-source-select');
-  const cookieProfileInput = document.getElementById('cookie-profile-input');
-  const cookieContainerInput = document.getElementById('cookie-container-input');
-  const cookieKeyringSelect = document.getElementById('cookie-keyring-select');
-  const cookieFileInput = document.getElementById('cookie-file-input');
   const cookieUseButton = document.getElementById('cookie-use-button');
   const cookieCancelButton = document.getElementById('cookie-cancel-button');
   const translationPromptDeTextarea = document.getElementById('translation-prompt-de-textarea');
@@ -248,20 +240,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         return {
           sourceType: 'browser',
           browser: String(source.browser),
-          profile: String(source.profile || '').trim() || null,
-          keyring: String(source.keyring || '').trim() || null,
-          container: String(source.container || '').trim() || null,
-          cookiesFile: null
-        };
-      }
-      if (source.sourceType === 'cookiesFile' && source.cookiesFile) {
-        return {
-          sourceType: 'cookiesFile',
-          browser: null,
           profile: null,
           keyring: null,
           container: null,
-          cookiesFile: String(source.cookiesFile).trim()
+          cookiesFile: null
         };
       }
     } catch {
@@ -287,63 +269,32 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (!source) {
       return '';
     }
-    if (source.sourceType === 'cookiesFile') {
-      return 'cookiesFile';
-    }
     if (source.sourceType === 'browser' && source.browser) {
       return `browser:${source.browser}`;
     }
     return '';
   }
 
-  function sourceFromFields(select, profileInput, containerInput, keyringSelect, fileInput) {
+  function sourceFromSelect(select) {
     const value = select.value;
     if (!value) {
       return null;
-    }
-    if (value === 'cookiesFile') {
-      const cookiesFile = fileInput.value.trim();
-      if (!cookiesFile) {
-        throw new Error('Enter a cookies.txt file path.');
-      }
-      return {
-        sourceType: 'cookiesFile',
-        browser: null,
-        profile: null,
-        keyring: null,
-        container: null,
-        cookiesFile
-      };
     }
     if (value.startsWith('browser:')) {
       return {
         sourceType: 'browser',
         browser: value.slice('browser:'.length),
-        profile: profileInput.value.trim() || null,
-        keyring: keyringSelect.value || null,
-        container: containerInput.value.trim() || null,
+        profile: null,
+        keyring: null,
+        container: null,
         cookiesFile: null
       };
     }
     return null;
   }
 
-  function applySourceToFields(source, select, profileInput, containerInput, keyringSelect, fileInput) {
+  function applySourceToSelect(source, select) {
     select.value = optionValueForSource(source);
-    profileInput.value = source?.profile || '';
-    containerInput.value = source?.container || '';
-    keyringSelect.value = source?.keyring || '';
-    fileInput.value = source?.cookiesFile || '';
-    updateCookieFieldVisibility(select, profileInput, containerInput, keyringSelect, fileInput);
-  }
-
-  function updateCookieFieldVisibility(select, profileInput, containerInput, keyringSelect, fileInput) {
-    const isBrowser = select.value.startsWith('browser:');
-    const isCookiesFile = select.value === 'cookiesFile';
-    profileInput.closest('.settings-field-group').hidden = !isBrowser;
-    containerInput.closest('.settings-field-group').hidden = !isBrowser;
-    keyringSelect.closest('.settings-field-group').hidden = !isBrowser;
-    fileInput.closest('.settings-field-group').hidden = !isCookiesFile;
   }
 
   function setCookieSelectOptions(select, sources, savedSource) {
@@ -362,16 +313,11 @@ window.addEventListener('DOMContentLoaded', async () => {
       select.appendChild(option);
     });
 
-    const cookiesFileOption = document.createElement('option');
-    cookiesFileOption.value = 'cookiesFile';
-    cookiesFileOption.textContent = 'cookies.txt file';
-    select.appendChild(cookiesFileOption);
-
     if (currentValue && !Array.from(select.options).some(option => option.value === currentValue)) {
       const savedOption = document.createElement('option');
       savedOption.value = currentValue;
       savedOption.textContent = `${savedSource?.browser || 'Saved browser'} (not detected)`;
-      select.insertBefore(savedOption, cookiesFileOption);
+      select.appendChild(savedOption);
     }
     select.value = currentValue;
   }
@@ -386,51 +332,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     const savedSource = loadYoutubeCookieSource();
     setCookieSelectOptions(youtubeCookieSourceSelect, sources, savedSource);
     setCookieSelectOptions(cookieSourceSelect, sources, savedSource);
-    applySourceToFields(
-      savedSource,
-      youtubeCookieSourceSelect,
-      youtubeCookieProfileInput,
-      youtubeCookieContainerInput,
-      youtubeCookieKeyringSelect,
-      youtubeCookieFileInput
-    );
-    applySourceToFields(
-      savedSource,
-      cookieSourceSelect,
-      cookieProfileInput,
-      cookieContainerInput,
-      cookieKeyringSelect,
-      cookieFileInput
-    );
+    applySourceToSelect(savedSource, youtubeCookieSourceSelect);
+    applySourceToSelect(savedSource, cookieSourceSelect);
     return sources;
   }
 
   function saveSettingsCookieSource() {
-    try {
-      const source = sourceFromFields(
-        youtubeCookieSourceSelect,
-        youtubeCookieProfileInput,
-        youtubeCookieContainerInput,
-        youtubeCookieKeyringSelect,
-        youtubeCookieFileInput
-      );
-      saveYoutubeCookieSource(source);
-    } catch {
-      saveYoutubeCookieSource(null);
-    }
+    saveYoutubeCookieSource(sourceFromSelect(youtubeCookieSourceSelect));
   }
 
   function openCookieDialog(message) {
     return new Promise(resolve => {
       cookieMessage.textContent = message;
-      applySourceToFields(
-        loadYoutubeCookieSource(),
-        cookieSourceSelect,
-        cookieProfileInput,
-        cookieContainerInput,
-        cookieKeyringSelect,
-        cookieFileInput
-      );
+      applySourceToSelect(loadYoutubeCookieSource(), cookieSourceSelect);
       cookieDialog.hidden = false;
       cookieSourceSelect.focus();
 
@@ -443,31 +357,14 @@ window.addEventListener('DOMContentLoaded', async () => {
         resolve(result);
       };
       const useHandler = () => {
-        try {
-          const source = sourceFromFields(
-            cookieSourceSelect,
-            cookieProfileInput,
-            cookieContainerInput,
-            cookieKeyringSelect,
-            cookieFileInput
-          );
-          if (!source) {
-            alert('Select a browser or cookies.txt file.');
-            return;
-          }
-          saveYoutubeCookieSource(source);
-          applySourceToFields(
-            source,
-            youtubeCookieSourceSelect,
-            youtubeCookieProfileInput,
-            youtubeCookieContainerInput,
-            youtubeCookieKeyringSelect,
-            youtubeCookieFileInput
-          );
-          close(source);
-        } catch (err) {
-          alert(err.message);
+        const source = sourceFromSelect(cookieSourceSelect);
+        if (!source) {
+          alert('Select a browser.');
+          return;
         }
+        saveYoutubeCookieSource(source);
+        applySourceToSelect(source, youtubeCookieSourceSelect);
+        close(source);
       };
       const cancelHandler = () => close(null);
       const dialogClickHandler = (event) => {
@@ -519,14 +416,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     whisperCheckbox.checked = localStorage.getItem('useWhisper') === '0' ? false : true;
     autoTranslateCheckbox.checked = localStorage.getItem('autoTranslate') === '1' ? true : false;
     discordWebhookInput.value = getDiscordWebhookUrl();
-    applySourceToFields(
-      loadYoutubeCookieSource(),
-      youtubeCookieSourceSelect,
-      youtubeCookieProfileInput,
-      youtubeCookieContainerInput,
-      youtubeCookieKeyringSelect,
-      youtubeCookieFileInput
-    );
+    applySourceToSelect(loadYoutubeCookieSource(), youtubeCookieSourceSelect);
     masterPromptTextarea.value = getMasterPrompt();
     translationPromptDeTextarea.value = getTranslationPrompt('de');
     translationPromptJpTextarea.value = getTranslationPrompt('jp');
@@ -549,14 +439,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   whisperCheckbox.checked = localStorage.getItem('useWhisper') === '0' ? false : true;
   autoTranslateCheckbox.checked = localStorage.getItem('autoTranslate') === '1' ? true : false;
   discordWebhookInput.value = getDiscordWebhookUrl();
-  applySourceToFields(
-    loadYoutubeCookieSource(),
-    youtubeCookieSourceSelect,
-    youtubeCookieProfileInput,
-    youtubeCookieContainerInput,
-    youtubeCookieKeyringSelect,
-    youtubeCookieFileInput
-  );
+  applySourceToSelect(loadYoutubeCookieSource(), youtubeCookieSourceSelect);
   masterPromptTextarea.value = getMasterPrompt();
   translationPromptDeTextarea.value = getTranslationPrompt('de');
   translationPromptJpTextarea.value = getTranslationPrompt('jp');
@@ -576,38 +459,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   });
   youtubeCookieSourceSelect.addEventListener('change', () => {
-    updateCookieFieldVisibility(
-      youtubeCookieSourceSelect,
-      youtubeCookieProfileInput,
-      youtubeCookieContainerInput,
-      youtubeCookieKeyringSelect,
-      youtubeCookieFileInput
-    );
     saveSettingsCookieSource();
   });
-  youtubeCookieProfileInput.addEventListener('input', saveSettingsCookieSource);
-  youtubeCookieContainerInput.addEventListener('input', saveSettingsCookieSource);
-  youtubeCookieKeyringSelect.addEventListener('change', saveSettingsCookieSource);
-  youtubeCookieFileInput.addEventListener('input', saveSettingsCookieSource);
   clearYoutubeCookieSourceButton.addEventListener('click', () => {
     saveYoutubeCookieSource(null);
-    applySourceToFields(
-      null,
-      youtubeCookieSourceSelect,
-      youtubeCookieProfileInput,
-      youtubeCookieContainerInput,
-      youtubeCookieKeyringSelect,
-      youtubeCookieFileInput
-    );
-  });
-  cookieSourceSelect.addEventListener('change', () => {
-    updateCookieFieldVisibility(
-      cookieSourceSelect,
-      cookieProfileInput,
-      cookieContainerInput,
-      cookieKeyringSelect,
-      cookieFileInput
-    );
+    applySourceToSelect(null, youtubeCookieSourceSelect);
   });
   masterPromptTextarea.addEventListener('input', () => {
     localStorage.setItem('masterPrompt', masterPromptTextarea.value);
