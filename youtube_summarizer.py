@@ -331,7 +331,7 @@ def apply_ytdlp_cookie_options(
     if browser_spec:
         opts["cookiesfrombrowser"] = browser_spec
     if use_js_challenge_fallback:
-        opts["js_runtimes"] = ["deno", "node"]
+        opts["js_runtimes"] = {"deno": {}, "node": {}}
         opts["remote_components"] = ["ejs:github"]
     return opts
 
