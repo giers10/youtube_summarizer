@@ -22,6 +22,12 @@ pip install --upgrade pip
 pip install -r requirements.txt
 pip install --upgrade yt-dlp
 
-# 4. Tauri App starten
-echo -e "${CYAN}4. Starte die Tauri App …${NC}"
+# 4. Tauri dev resources writable halten
+echo -e "${CYAN}4. Tauri dev resources vorbereiten …${NC}"
+find src-tauri/resources src-tauri/target/debug \
+    \( -path "*/backend/*" -o -path "*/ffmpeg/*" \) \
+    -type f -exec chmod u+w {} + 2>/dev/null || true
+
+# 5. Tauri App starten
+echo -e "${CYAN}5. Starte die Tauri App …${NC}"
 cargo run --manifest-path src-tauri/Cargo.toml
