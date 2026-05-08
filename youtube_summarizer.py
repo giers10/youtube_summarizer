@@ -275,7 +275,9 @@ YOUTUBE_AUTH_ERROR_MARKERS = (
 )
 
 
-def parse_cookies_from_browser_spec(spec: Optional[str]) -> Optional[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]:
+def parse_cookies_from_browser_spec(
+    spec: Optional[str],
+) -> Optional[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]:
     """Parse yt-dlp's browser cookie spec into the tuple YoutubeDL expects."""
     if not spec:
         return None
@@ -990,6 +992,10 @@ def main():
                         help="Prompt template for the summary LLM call.")
     parser.add_argument('--prompt-template-file', type=str, default=None,
                         help="Path to a text file containing the prompt template.")
+    parser.add_argument('--cookies-from-browser', type=str, default=None,
+                        help="Browser cookie source to pass to yt-dlp.")
+    parser.add_argument('--cookies-file', type=str, default=None,
+                        help="Netscape cookies.txt file to pass to yt-dlp.")
     args = parser.parse_args()
 
     use_whisper = not args.no_ai
@@ -1001,10 +1007,18 @@ def main():
     try:
         # If a transcript file is provided, skip the normal processing and only rewrite summary
         if args.transcript_file:
-            vid, title, _ = fetch_video_metadata(args.url)
+            vid, title, _ = fetch_video_metadata(args.url, args.cookies_from_browser, args.cookies_file)
             meta = rewrite_summary(title, args.transcript_file, args.model, args.output_json, prompt_template)
         else:
-            meta = process_video(args.url, use_whisper, args.model, args.output_json, prompt_template)
+            meta = process_video(
+                args.url,
+                use_whisper,
+                args.model,
+                args.output_json,
+                prompt_template,
+                args.cookies_from_browser,
+                args.cookies_file,
+            )
         # If no JSON output specified, print metadata as JSON to stdout
         if not args.output_json:
             print(json.dumps(meta, ensure_ascii=False, indent=2))

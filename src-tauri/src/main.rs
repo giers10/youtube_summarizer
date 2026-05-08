@@ -61,6 +61,18 @@ struct SummarizeVideoRequest {
     use_whisper: bool,
     model: Option<String>,
     master_prompt: Option<String>,
+    cookie_source: Option<YoutubeCookieSourceRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct YoutubeCookieSourceRequest {
+    source_type: String,
+    browser: Option<String>,
+    profile: Option<String>,
+    keyring: Option<String>,
+    container: Option<String>,
+    cookies_file: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,6 +118,51 @@ struct OllamaTagsResponse {
 struct OllamaModel {
     name: String,
 }
+
+#[derive(Clone, Copy, Debug, Serialize)]
+struct YoutubeCookieBrowserOption {
+    id: &'static str,
+    label: &'static str,
+}
+
+const YOUTUBE_COOKIE_BROWSER_OPTIONS: &[YoutubeCookieBrowserOption] = &[
+    YoutubeCookieBrowserOption {
+        id: "chrome",
+        label: "Google Chrome",
+    },
+    YoutubeCookieBrowserOption {
+        id: "firefox",
+        label: "Firefox",
+    },
+    YoutubeCookieBrowserOption {
+        id: "safari",
+        label: "Safari",
+    },
+    YoutubeCookieBrowserOption {
+        id: "edge",
+        label: "Microsoft Edge",
+    },
+    YoutubeCookieBrowserOption {
+        id: "brave",
+        label: "Brave",
+    },
+    YoutubeCookieBrowserOption {
+        id: "chromium",
+        label: "Chromium",
+    },
+    YoutubeCookieBrowserOption {
+        id: "vivaldi",
+        label: "Vivaldi",
+    },
+    YoutubeCookieBrowserOption {
+        id: "opera",
+        label: "Opera",
+    },
+    YoutubeCookieBrowserOption {
+        id: "whale",
+        label: "Naver Whale",
+    },
+];
 
 #[derive(Debug)]
 struct StoredSummary {

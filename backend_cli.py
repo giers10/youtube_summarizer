@@ -52,6 +52,8 @@ def summarize(args: argparse.Namespace) -> int:
         model=args.model,
         prompt_template=prompt_template,
         output_json=args.output_json,
+        cookies_from_browser=args.cookies_from_browser,
+        cookies_file=args.cookies_file,
     )
     if not args.output_json:
         print(json.dumps(meta, ensure_ascii=False), flush=True)
@@ -97,6 +99,14 @@ def build_parser() -> argparse.ArgumentParser:
     summarize_parser.add_argument(
         "--output-json",
         help="Write the result metadata to a JSON file instead of stdout",
+    )
+    summarize_parser.add_argument(
+        "--cookies-from-browser",
+        help="Browser cookie source for yt-dlp, e.g. chrome, firefox:default, or chrome+gnomekeyring:Default",
+    )
+    summarize_parser.add_argument(
+        "--cookies-file",
+        help="Netscape cookies.txt file to pass to yt-dlp",
     )
     summarize_parser.set_defaults(use_whisper=True, handler=summarize)
 
