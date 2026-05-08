@@ -538,9 +538,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     settingsDialog.hidden = true;
   }
 
+  await refreshYoutubeCookieSourceOptions();
+
   whisperCheckbox.checked = localStorage.getItem('useWhisper') === '0' ? false : true;
   autoTranslateCheckbox.checked = localStorage.getItem('autoTranslate') === '1' ? true : false;
   discordWebhookInput.value = getDiscordWebhookUrl();
+  applySourceToFields(
+    loadYoutubeCookieSource(),
+    youtubeCookieSourceSelect,
+    youtubeCookieProfileInput,
+    youtubeCookieContainerInput,
+    youtubeCookieKeyringSelect,
+    youtubeCookieFileInput
+  );
   masterPromptTextarea.value = getMasterPrompt();
   translationPromptDeTextarea.value = getTranslationPrompt('de');
   translationPromptJpTextarea.value = getTranslationPrompt('jp');
@@ -558,6 +568,40 @@ window.addEventListener('DOMContentLoaded', async () => {
     } else {
       localStorage.removeItem('discordWebhookUrl');
     }
+  });
+  youtubeCookieSourceSelect.addEventListener('change', () => {
+    updateCookieFieldVisibility(
+      youtubeCookieSourceSelect,
+      youtubeCookieProfileInput,
+      youtubeCookieContainerInput,
+      youtubeCookieKeyringSelect,
+      youtubeCookieFileInput
+    );
+    saveSettingsCookieSource();
+  });
+  youtubeCookieProfileInput.addEventListener('input', saveSettingsCookieSource);
+  youtubeCookieContainerInput.addEventListener('input', saveSettingsCookieSource);
+  youtubeCookieKeyringSelect.addEventListener('change', saveSettingsCookieSource);
+  youtubeCookieFileInput.addEventListener('input', saveSettingsCookieSource);
+  clearYoutubeCookieSourceButton.addEventListener('click', () => {
+    saveYoutubeCookieSource(null);
+    applySourceToFields(
+      null,
+      youtubeCookieSourceSelect,
+      youtubeCookieProfileInput,
+      youtubeCookieContainerInput,
+      youtubeCookieKeyringSelect,
+      youtubeCookieFileInput
+    );
+  });
+  cookieSourceSelect.addEventListener('change', () => {
+    updateCookieFieldVisibility(
+      cookieSourceSelect,
+      cookieProfileInput,
+      cookieContainerInput,
+      cookieKeyringSelect,
+      cookieFileInput
+    );
   });
   masterPromptTextarea.addEventListener('input', () => {
     localStorage.setItem('masterPrompt', masterPromptTextarea.value);
