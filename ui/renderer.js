@@ -234,10 +234,295 @@ window.addEventListener('DOMContentLoaded', async () => {
     return (localStorage.getItem('discordWebhookUrl') || '').trim();
   }
 
+  function loadYoutubeCookieSource() {
+    const raw = localStorage.getItem(YOUTUBE_COOKIE_SOURCE_KEY);
+    if (!raw) {
+      return null;
+    }
+    try {
+      const source = JSON.parse(raw);
+      if (!source || typeof source !== 'object') {
+        return null;
+      }
+      if (source.sourceType === 'browser' && source.browser) {
+        return {
+          sourceType: 'browser',
+          browser: String(source.browser),
+          profile: String(source.profile || '').trim() || null,
+          keyring: String(source.keyring || '').trim() || null,
+          container: String(source.container || '').trim() || null,
+          cookiesFile: null
+        };
+      }
+      if (source.sourceType === 'cookiesFile' && source.cookiesFile) {
+        return {
+          sourceType: 'cookiesFile',
+          browser: null,
+          profile: null,
+          keyring: null,
+          container: null,
+          cookiesFile: String(source.cookiesFile).trim()
+        };
+      }
+    } catch {
+      localStorage.removeItem(YOUTUBE_COOKIE_SOURCE_KEY);
+    }
+    return null;
+  }
+
+  function saveYoutubeCookieSource(source) {
+    if (!source) {
+      localStorage.removeItem(YOUTUBE_COOKIE_SOURCE_KEY);
+      return;
+    }
+    localStorage.setItem(YOUTUBE_COOKIE_SOURCE_KEY, JSON.stringify(source));
+  }
+
+  function isYoutubeCookieError(err) {
+    const message = String(err?.message || err || '').toLowerCase();
+    return YOUTUBE_COOKIE_ERROR_PATTERNS.some(pattern => message.includes(pattern));
+  }
+
+  function optionValueForSource(source) {
+    if (!source) {
+      return '';
+    }
+    if (source.sourceType === 'cookiesFile') {
+      return 'cookiesFile';
+    }
+    if (source.sourceType === 'browser' && source.browser) {
+      return `browser:${source.browser}`;
+    }
+    return '';
+  }
+
+  function sourceFromFields(select, profileInput, containerInput, keyringSelect, fileInput) {
+    const value = select.value;
+    if (!value) {
+      return null;
+    }
+    if (value === 'cookiesFile') {
+      const cookiesFile = fileInput.value.trim();
+      if (!cookiesFile) {
+        throw new Error('Enter a cookies.txt file path.');
+      }
+      return {
+        sourceType: 'cookiesFile',
+        browser: null,
+        profile: null,
+        keyring: null,
+        container: null,
+        cookiesFile
+      };
+    }
+    if (value.startsWith('browser:')) {
+      return {
+        sourceType: 'browser',
+        browser: value.slice('browser:'.length),
+        profile: profileInput.value.trim() || null,
+        keyring: keyringSelect.value || null,
+        container: containerInput.value.trim() || null,
+        cookiesFile: null
+      };
+    }
+    return null;
+  }
+
+  function applySourceToFields(source, select, profileInput, containerInput, keyringSelect, fileInput) {
+    select.value = optionValueForSource(source);
+    profileInput.value = source?.profile || '';
+    containerInput.value = source?.container || '';
+    keyringSelect.value = source?.keyring || '';
+    fileInput.value = source?.cookiesFile || '';
+    updateCookieFieldVisibility(select, profileInput, containerInput, keyringSelect, fileInput);
+  }
+
+  function updateCookieFieldVisibility(select, profileInput, containerInput, keyringSelect, fileInput) {
+    const isBrowser = select.value.startsWith('browser:');
+    const isCookiesFile = select.value === 'cookiesFile';
+    profileInput.closest('.settings-field-group').hidden = !isBrowser;
+    containerInput.closest('.settings-field-group').hidden = !isBrowser;
+    keyringSelect.closest('.settings-field-group').hidden = !isBrowser;
+    fileInput.closest('.settings-field-group').hidden = !isCookiesFile;
+  }
+
+  function setCookieSelectOptions(select, sources, savedSource) {
+    const currentValue = optionValueForSource(savedSource) || select.value;
+    select.innerHTML = '';
+
+    const noneOption = document.createElement('option');
+    noneOption.value = '';
+    noneOption.textContent = 'Ask when needed';
+    select.appendChild(noneOption);
+
+    (sources || []).forEach(source => {
+      const option = document.createElement('option');
+      option.value = `browser:${source.id}`;
+      option.textContent = source.label;
+      select.appendChild(option);
+    });
+
+    const cookiesFileOption = document.createElement('option');
+    cookiesFileOption.value = 'cookiesFile';
+    cookiesFileOption.textContent = 'cookies.txt file';
+    select.appendChild(cookiesFileOption);
+
+    if (currentValue && !Array.from(select.options).some(option => option.value === currentValue)) {
+      const savedOption = document.createElement('option');
+      savedOption.value = currentValue;
+      savedOption.textContent = `${savedSource?.browser || 'Saved browser'} (not detected)`;
+      select.insertBefore(savedOption, cookiesFileOption);
+    }
+    select.value = currentValue;
+  }
+
+  async function refreshYoutubeCookieSourceOptions() {
+    let sources = [];
+    try {
+      sources = await window.api.getYoutubeCookieSources();
+    } catch (err) {
+      console.error('Failed to detect browsers for YouTube cookies:', err);
+    }
+    const savedSource = loadYoutubeCookieSource();
+    setCookieSelectOptions(youtubeCookieSourceSelect, sources, savedSource);
+    setCookieSelectOptions(cookieSourceSelect, sources, savedSource);
+    applySourceToFields(
+      savedSource,
+      youtubeCookieSourceSelect,
+      youtubeCookieProfileInput,
+      youtubeCookieContainerInput,
+      youtubeCookieKeyringSelect,
+      youtubeCookieFileInput
+    );
+    applySourceToFields(
+      savedSource,
+      cookieSourceSelect,
+      cookieProfileInput,
+      cookieContainerInput,
+      cookieKeyringSelect,
+      cookieFileInput
+    );
+    return sources;
+  }
+
+  function saveSettingsCookieSource() {
+    const source = sourceFromFields(
+      youtubeCookieSourceSelect,
+      youtubeCookieProfileInput,
+      youtubeCookieContainerInput,
+      youtubeCookieKeyringSelect,
+      youtubeCookieFileInput
+    );
+    saveYoutubeCookieSource(source);
+  }
+
+  function openCookieDialog(message) {
+    return new Promise(resolve => {
+      cookieMessage.textContent = message;
+      applySourceToFields(
+        loadYoutubeCookieSource(),
+        cookieSourceSelect,
+        cookieProfileInput,
+        cookieContainerInput,
+        cookieKeyringSelect,
+        cookieFileInput
+      );
+      cookieDialog.hidden = false;
+      cookieSourceSelect.focus();
+
+      const close = (result) => {
+        cookieDialog.hidden = true;
+        cookieUseButton.removeEventListener('click', useHandler);
+        cookieCancelButton.removeEventListener('click', cancelHandler);
+        cookieDialog.removeEventListener('click', dialogClickHandler);
+        window.removeEventListener('keydown', keyHandler);
+        resolve(result);
+      };
+      const useHandler = () => {
+        try {
+          const source = sourceFromFields(
+            cookieSourceSelect,
+            cookieProfileInput,
+            cookieContainerInput,
+            cookieKeyringSelect,
+            cookieFileInput
+          );
+          if (!source) {
+            alert('Select a browser or cookies.txt file.');
+            return;
+          }
+          saveYoutubeCookieSource(source);
+          applySourceToFields(
+            source,
+            youtubeCookieSourceSelect,
+            youtubeCookieProfileInput,
+            youtubeCookieContainerInput,
+            youtubeCookieKeyringSelect,
+            youtubeCookieFileInput
+          );
+          close(source);
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      const cancelHandler = () => close(null);
+      const dialogClickHandler = (event) => {
+        if (!cookiePanel.contains(event.target)) {
+          close(null);
+        }
+      };
+      const keyHandler = (event) => {
+        if (event.key === 'Escape' && !cookieDialog.hidden) {
+          close(null);
+        }
+      };
+
+      cookieUseButton.addEventListener('click', useHandler);
+      cookieCancelButton.addEventListener('click', cancelHandler);
+      cookieDialog.addEventListener('click', dialogClickHandler);
+      window.addEventListener('keydown', keyHandler);
+    });
+  }
+
+  async function summarizeWithCookieFlow(url, useWhisper, selectedModel, masterPrompt) {
+    let cookieSource = loadYoutubeCookieSource();
+    let authPromptMessage = 'YouTube requires browser cookies for this video. Select a signed-in browser and try again.';
+
+    for (;;) {
+      try {
+        return await window.api.summarizeVideo(url, useWhisper, selectedModel, masterPrompt, cookieSource);
+      } catch (err) {
+        if (!isYoutubeCookieError(err)) {
+          throw err;
+        }
+        if (cookieSource) {
+          saveYoutubeCookieSource(null);
+          authPromptMessage = 'The selected YouTube cookie source did not work. Make sure you are signed into YouTube, then choose a source again.';
+          await refreshYoutubeCookieSourceOptions();
+        }
+        const selectedSource = await openCookieDialog(authPromptMessage);
+        if (!selectedSource) {
+          throw new Error('YouTube requires valid browser cookies for this video.');
+        }
+        cookieSource = selectedSource;
+        authPromptMessage = 'The selected YouTube cookie source did not work. Choose another source or sign into YouTube in that browser.';
+        setLoadingMessage('Retrying with YouTube cookies...');
+      }
+    }
+  }
+
   function syncSettingsFields() {
     whisperCheckbox.checked = localStorage.getItem('useWhisper') === '0' ? false : true;
     autoTranslateCheckbox.checked = localStorage.getItem('autoTranslate') === '1' ? true : false;
     discordWebhookInput.value = getDiscordWebhookUrl();
+    applySourceToFields(
+      loadYoutubeCookieSource(),
+      youtubeCookieSourceSelect,
+      youtubeCookieProfileInput,
+      youtubeCookieContainerInput,
+      youtubeCookieKeyringSelect,
+      youtubeCookieFileInput
+    );
     masterPromptTextarea.value = getMasterPrompt();
     translationPromptDeTextarea.value = getTranslationPrompt('de');
     translationPromptJpTextarea.value = getTranslationPrompt('jp');
