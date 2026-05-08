@@ -296,8 +296,8 @@ fn build_youtube_cookie_args(
             }
 
             let mut spec = browser;
-            if let Some(keyring) = clean_optional_string(&source.keyring)
-                .map(|value| value.to_ascii_lowercase())
+            if let Some(keyring) =
+                clean_optional_string(&source.keyring).map(|value| value.to_ascii_lowercase())
             {
                 if !is_supported_linux_keyring(&keyring) {
                     return Err(format!("Unsupported Linux keyring: {keyring}"));
