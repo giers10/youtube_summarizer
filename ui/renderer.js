@@ -406,14 +406,18 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   function saveSettingsCookieSource() {
-    const source = sourceFromFields(
-      youtubeCookieSourceSelect,
-      youtubeCookieProfileInput,
-      youtubeCookieContainerInput,
-      youtubeCookieKeyringSelect,
-      youtubeCookieFileInput
-    );
-    saveYoutubeCookieSource(source);
+    try {
+      const source = sourceFromFields(
+        youtubeCookieSourceSelect,
+        youtubeCookieProfileInput,
+        youtubeCookieContainerInput,
+        youtubeCookieKeyringSelect,
+        youtubeCookieFileInput
+      );
+      saveYoutubeCookieSource(source);
+    } catch {
+      saveYoutubeCookieSource(null);
+    }
   }
 
   function openCookieDialog(message) {
